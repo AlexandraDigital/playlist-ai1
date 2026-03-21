@@ -81,9 +81,15 @@ export default function App() {
   const [downloading, setDownloading] = useState(new Set());
   const [dlProgress, setDlProgress] = useState({});
 
+  // Manual search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+
   const audioRef = useRef(null);
   const blobUrls = useRef({});
-  const previewUrlRef = useRef(null); // Spotify preview fallback
+  const previewUrlRef = useRef(null);
 
   useEffect(() => {
     dbKeys().then(ids => setOfflineIds(new Set(ids))).catch(() => {});
@@ -105,6 +111,7 @@ export default function App() {
             previewUrl: data.previewUrl || null,
             spotifyUrl: data.spotifyUrl || null,
             albumName: data.albumName || null,
+            spotifyId: data.spotifyId || null,
           };
         } catch {
           return song;
@@ -112,6 +119,62 @@ export default function App() {
       })
     );
     return results.map((r, i) => (r.status === 'fulfilled' ? r.value : songs[i]));
+  }
+
+  // ── Manual song search ───────────────────────────────────────────
+  async function searchSongs() {
+    if (!searchQuery.trim() || isSearching) return;
+    setIsSearching(true);
+    setSearchResults([]);
+    try {
+      // Search Spotify for up to 10 results
+      const res = await fetch(
+        `/api/spotify?q=${encodeURIComponent(searchQuery)}&limit=10&type=search`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        // If it returns a single track (old endpoint), wrap it
+        if (data.spotifyId) {
+          const title = searchQuery.split(' - ')[0] || searchQuery;
+          const artist = searchQuery.split(' - ')[1] || '';
+          setSearchResults([{
+            title,
+            artist,
+            albumArt: data.albumArt,
+            previewUrl: data.previewUrl,
+            spotifyUrl: data.spotifyUrl,
+            spotifyId: data.spotifyId,
+            videoId: null,
+          }]);
+        } else if (data.tracks?.length) {
+          setSearchResults(data.tracks.map(t => ({ ...t, videoId: null })));
+        } else {
+          setSearchResults([]);
+        }
+      }
+
+      // Also search YouTube/Piped to add a result if Spotify comes back empty
+      if (searchResults.length === 0) {
+        const ytRes = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchQuery)}`);
+        if (ytRes.ok) {
+          const ytData = await ytRes.json();
+          if (ytData.videoId) {
+            const parts = searchQuery.split(' - ');
+            setSearchResults([{
+              title: parts[0]?.trim() || searchQuery,
+              artist: parts[1]?.trim() || '',
+              videoId: ytData.videoId,
+              albumArt: null,
+              previewUrl: null,
+            }]);
+          }
+        }
+      }
+    } catch (e) {
+      setError(`Search failed: ${e.message}`);
+    } finally {
+      setIsSearching(false);
+    }
   }
 
   // ── Generate playlist ────────────────────────────────────────────
@@ -131,13 +194,11 @@ export default function App() {
       const text = data.content || data.message || data.reply || '';
       const songs = parseSongs(text);
       if (!songs.length) throw new Error('No songs in response — try a different prompt.');
-      setSuggestions(songs); // show immediately with AI results
+      setSuggestions(songs);
 
-      // Enrich with Spotify metadata, then pull Spotify recommendations for even more songs
       enrichWithSpotify(songs).then(async enriched => {
         setSuggestions(enriched);
 
-        // Grab up to 5 Spotify track IDs from enriched results to use as recommendation seeds
         const seeds = enriched
           .map(s => s.spotifyId)
           .filter(Boolean)
@@ -145,15 +206,12 @@ export default function App() {
 
         if (seeds.length > 0) {
           try {
-            const recRes = await fetch(
-              `/api/spotify?seeds=${seeds.join(',')}&limit=20`
-            );
+            const recRes = await fetch(`/api/spotify?seeds=${seeds.join(',')}&limit=20`);
             if (recRes.ok) {
               const recData = await recRes.json();
               const recTracks = recData.tracks || [];
               if (recTracks.length > 0) {
                 setSuggestions(prev => {
-                  // Deduplicate by "title__artist"
                   const existing = new Set(prev.map(s => `${s.title}__${s.artist}`.toLowerCase()));
                   const newOnes = recTracks.filter(
                     t => !existing.has(`${t.title}__${t.artist}`.toLowerCase())
@@ -162,9 +220,7 @@ export default function App() {
                 });
               }
             }
-          } catch {
-            // Spotify recommendations failed — no big deal, we already have the AI songs
-          }
+          } catch {}
         }
       });
     } catch (e) {
@@ -176,22 +232,24 @@ export default function App() {
 
   // ── Add song to playlist ─────────────────────────────────────────
   async function addToPlaylist(song) {
-    if (!song?.title || !song?.artist) return;
+    if (!song?.title) return;
     const key = `${song.title}__${song.artist}`;
 
-    // Use updater fn so the duplicate check always sees latest state (no stale closure)
     let alreadyAdded = false;
     setPlaylist(prev => {
       if (prev.some(t => `${t.title}__${t.artist}` === key)) {
         alreadyAdded = true;
         return prev;
       }
+      // If song already has a videoId (from manual search), skip the lookup
+      if (song.videoId) {
+        return [...prev, { ...song, loading: false }];
+      }
       return [...prev, { ...song, videoId: null, loading: true }];
     });
 
-    // Give React a tick to flush the state update
     await new Promise(r => setTimeout(r, 0));
-    if (alreadyAdded) return;
+    if (alreadyAdded || song.videoId) return;
 
     try {
       const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(`${song.title} ${song.artist}`)}`);
@@ -204,7 +262,7 @@ export default function App() {
             : t
         )
       );
-    } catch (err) {
+    } catch {
       setPlaylist(prev =>
         prev.map(t => `${t.title}__${t.artist}` === key ? { ...t, loading: false } : t)
       );
@@ -221,11 +279,9 @@ export default function App() {
     if (!audio) return;
     audio.pause();
 
-    // Store preview URL for fallback in onError
     previewUrlRef.current = track.previewUrl || null;
 
     try {
-      // Try offline blob first
       if (track.videoId) {
         const stored = await dbGet(track.videoId);
         if (stored?.blob) {
@@ -238,7 +294,6 @@ export default function App() {
           await audio.play();
           return;
         }
-        // Stream via proxy
         audio.src = `/api/stream-audio?videoId=${track.videoId}`;
         audio.load();
         setPlaying(true);
@@ -246,10 +301,9 @@ export default function App() {
         return;
       }
 
-      // No videoId yet — try Spotify preview
       if (track.previewUrl) {
         audio.src = track.previewUrl;
-        previewUrlRef.current = null; // don't double-fallback
+        previewUrlRef.current = null;
         audio.load();
         setPlaying(true);
         await audio.play();
@@ -276,7 +330,7 @@ export default function App() {
     selectTrack(currentIdx === null ? 0 : (currentIdx - 1 + playlist.length) % playlist.length);
   }
 
-  // ── Download for offline (with progress) ────────────────────────
+  // ── Download for offline ─────────────────────────────────────────
   async function downloadOffline(e, track) {
     e.stopPropagation();
     if (!track.videoId || downloading.has(track.videoId)) return;
@@ -300,10 +354,7 @@ export default function App() {
         if (done) break;
         chunks.push(value);
         received += value.length;
-        setDlProgress(prev => ({
-          ...prev,
-          [track.videoId]: { received, total },
-        }));
+        setDlProgress(prev => ({ ...prev, [track.videoId]: { received, total } }));
       }
 
       const blob = new Blob(chunks);
@@ -358,7 +409,6 @@ export default function App() {
         onError={e => {
           const preview = previewUrlRef.current;
           if (preview) {
-            // Fallback to Spotify 30-sec preview
             previewUrlRef.current = null;
             const audio = audioRef.current;
             audio.src = preview;
@@ -377,6 +427,7 @@ export default function App() {
         <p>Describe your vibe — AI curates the songs, you own the playlist</p>
       </div>
 
+      {/* ── AI Prompt bar ── */}
       <div className="search-bar">
         <input
           value={prompt}
@@ -389,6 +440,67 @@ export default function App() {
           {isGenerating ? <><span className="spinner" /> Thinking…</> : '✨ Generate'}
         </button>
       </div>
+
+      {/* ── Manual search toggle ── */}
+      <div className="manual-search-toggle">
+        <button
+          className="toggle-search-btn"
+          onClick={() => { setShowSearch(s => !s); setSearchResults([]); setSearchQuery(''); }}
+        >
+          {showSearch ? '✕ Close Search' : '🔍 Add any song manually'}
+        </button>
+      </div>
+
+      {/* ── Manual search bar ── */}
+      {showSearch && (
+        <div className="manual-search-panel">
+          <div className="search-bar">
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && searchSongs()}
+              placeholder="Search any song or artist (e.g. Kendrick Lamar, Hotel California...)"
+              autoFocus
+            />
+            <button className="generate-btn" onClick={searchSongs} disabled={isSearching}>
+              {isSearching ? <><span className="spinner" /> Searching…</> : '🔍 Search'}
+            </button>
+          </div>
+
+          {searchResults.length > 0 && (
+            <div className="search-results songs-grid">
+              {searchResults.map((song, i) => {
+                const key = `${song.title}__${song.artist}`;
+                const added = inPlaylist.has(key);
+                return (
+                  <div key={i} className={`song-card ${added ? 'in-playlist' : ''}`}>
+                    {song.albumArt
+                      ? <img className="song-art" src={song.albumArt} alt="" loading="lazy" />
+                      : <div className="song-art-placeholder">🎵</div>
+                    }
+                    <div className="song-details">
+                      <div className="song-title">{song.title}</div>
+                      <div className="song-artist">{song.artist}</div>
+                    </div>
+                    <button
+                      className={`add-btn ${added ? 'added' : ''}`}
+                      onClick={() => !added && addToPlaylist(song)}
+                    >
+                      {added ? '✓' : '+'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {!isSearching && searchQuery && searchResults.length === 0 && (
+            <div className="empty-state" style={{ padding: '20px' }}>
+              <p>No results — try a different search term</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="error-banner" onClick={() => setError('')}>
@@ -447,7 +559,7 @@ export default function App() {
           {playlist.length === 0 ? (
             <div className="empty-state">
               <span>📋</span>
-              <p>Add songs from suggestions</p>
+              <p>Add songs from suggestions or search above</p>
             </div>
           ) : (
             <div className="track-list">

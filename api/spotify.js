@@ -34,8 +34,9 @@ function trackToSong(track) {
 export default async function handler(req) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q');
-  const seeds = searchParams.get('seeds');   // comma-separated Spotify track IDs
-  const limit = parseInt(searchParams.get('limit') || '20', 10);
+  const seeds = searchParams.get('seeds');
+  const type = searchParams.get('type');   // 'search' = return multiple results
+  const limit = parseInt(searchParams.get('limit') || '1', 10);
 
   try {
     const token = await getSpotifyToken();
@@ -43,7 +44,7 @@ export default async function handler(req) {
     // ── Mode 1: recommendations from seed track IDs ──
     if (seeds) {
       const res = await fetch(
-        `https://api.spotify.com/v1/recommendations?seed_tracks=${encodeURIComponent(seeds)}&limit=${Math.min(limit, 100)}`,
+        `https://api.spotify.com/v1/recommendations?seed_tracks=${encodeURIComponent(seeds)}&limit=${Math.min(limit || 20, 100)}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
       const data = await res.json();
@@ -53,9 +54,23 @@ export default async function handler(req) {
       });
     }
 
-    // ── Mode 2: search for single track metadata ──
     if (!q) return new Response(JSON.stringify({ error: 'q or seeds required' }), { status: 400 });
 
+    // ── Mode 2: multi-result search (manual search) ──
+    if (type === 'search') {
+      const searchLimit = Math.min(limit || 10, 20);
+      const res = await fetch(
+        `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=${searchLimit}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      const data = await res.json();
+      const tracks = (data.tracks?.items || []).map(trackToSong);
+      return new Response(JSON.stringify({ tracks }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── Mode 3: single track metadata enrichment ──
     const res = await fetch(
       `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=1`,
       { headers: { 'Authorization': `Bearer ${token}` } }
