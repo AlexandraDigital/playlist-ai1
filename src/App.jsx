@@ -193,6 +193,26 @@ const STYLES = `
   .t-btn.upload { }
   .t-btn.upload:hover { border-color:rgba(168,85,247,.4); color:var(--purple-light); }
 
+  /* AI SUGGESTIONS */
+  .suggest-list { display:flex; flex-direction:column; gap:4px; max-height:220px; overflow-y:auto; margin-top:4px; }
+  .suggest-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px;
+    border:1px solid var(--border); background:var(--card); cursor:pointer; transition:all .15s; }
+  .suggest-row.selected { border-color:rgba(168,85,247,.5); background:var(--purple-dim); }
+  .suggest-check { width:18px; height:18px; border-radius:5px; border:1.5px solid var(--border);
+    display:flex; align-items:center; justify-content:center; font-size:11px; flex-shrink:0; transition:all .15s; }
+  .suggest-row.selected .suggest-check { background:var(--purple); border-color:var(--purple); color:#fff; }
+  .suggest-song { flex:1; min-width:0; }
+  .suggest-title { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .suggest-artist { font-size:11px; color:var(--sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .suggest-dur { font-size:11px; color:var(--muted); flex-shrink:0; }
+  .suggest-actions { display:flex; gap:6px; margin-top:8px; }
+  .suggest-add-btn { flex:1; padding:9px; background:var(--purple); border:none; border-radius:8px;
+    color:#fff; font-family:var(--font); font-size:13px; font-weight:500; cursor:pointer; transition:background .15s; }
+  .suggest-add-btn:hover { background:var(--purple2); }
+  .suggest-add-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .suggest-all-btn { padding:9px 14px; background:transparent; border:1px solid var(--border); border-radius:8px;
+    color:var(--muted); font-family:var(--font); font-size:12px; cursor:pointer; white-space:nowrap; }
+
   /* PLAYER BAR */
   .player { background:var(--surface); border-top:1px solid var(--border);
     padding:12px 24px; display:flex; align-items:center; gap:14px; }
@@ -306,6 +326,8 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem("saved-playlists") || "[]"); } catch { return []; }
   });
   const [newPlName, setNewPlName] = useState("");
+  const [aiSuggestions, setAiSuggestions] = useState([]); // songs AI suggested, not yet added
+  const [aiSelected, setAiSelected] = useState(new Set()); // indices of selected suggestions
 
   const ytPlayerRef = useRef(null);
   const ytReadyRef = useRef(false);
@@ -508,13 +530,13 @@ Include 6-10 songs. No explanations, just the JSON array.`;
       } catch { /* not JSON */ }
 
       const displayReply = songs.length
-        ? `Adding ${songs.length} songs to your playlist ✦`
+        ? `Found ${songs.length} songs — pick the ones you want ✦`
         : reply;
 
       setAiMsgs([...newMsgs, { role: "assistant", content: displayReply }]);
       if (songs.length) {
-        setTab("playlist");
-        songs.forEach((s) => addTrack(s));
+        setAiSuggestions(songs);
+        setAiSelected(new Set(songs.map((_, i) => i))); // all selected by default
       }
     } catch (e) {
       setAiMsgs([...newMsgs, { role: "assistant", content: `Error: ${e.message}` }]);
@@ -760,6 +782,54 @@ Include 6-10 songs. No explanations, just the JSON array.`;
                 ))}
               </div>
             )}
+            {aiSuggestions.length > 0 && (
+              <>
+                <div className="suggest-list">
+                  {aiSuggestions.map((s, i) => (
+                    <div
+                      key={i}
+                      className={`suggest-row${aiSelected.has(i) ? " selected" : ""}`}
+                      onClick={() => setAiSelected((prev) => {
+                        const next = new Set(prev);
+                        next.has(i) ? next.delete(i) : next.add(i);
+                        return next;
+                      })}
+                    >
+                      <div className="suggest-check">{aiSelected.has(i) ? "✓" : ""}</div>
+                      <div className="suggest-song">
+                        <div className="suggest-title">{s.title}</div>
+                        <div className="suggest-artist">{s.artist}</div>
+                      </div>
+                      {s.duration && <div className="suggest-dur">{s.duration}</div>}
+                    </div>
+                  ))}
+                </div>
+                <div className="suggest-actions">
+                  <button
+                    className="suggest-add-btn"
+                    disabled={aiSelected.size === 0}
+                    onClick={() => {
+                      const toAdd = aiSuggestions.filter((_, i) => aiSelected.has(i));
+                      toAdd.forEach((s) => addTrack(s));
+                      setAiSuggestions([]);
+                      setAiSelected(new Set());
+                      setTab("playlist");
+                    }}
+                  >
+                    Add {aiSelected.size} song{aiSelected.size !== 1 ? "s" : ""} →
+                  </button>
+                  <button
+                    className="suggest-all-btn"
+                    onClick={() => setAiSelected(new Set(aiSuggestions.map((_, i) => i)))}
+                  >All</button>
+                  <button
+                    className="suggest-all-btn"
+                    onClick={() => setAiSelected(new Set())}
+                  >None</button>
+                </div>
+              </>
+            )}
+
             <div className="ai-input-row">
               <input
                 className="ai-input"
