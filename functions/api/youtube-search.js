@@ -19,7 +19,8 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=1&q=${encodeURIComponent(q)}&key=${apiKey}`;
+    // No videoCategoryId filter - works for all songs including lesser-known artists
+    const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=3&q=${encodeURIComponent(q)}&key=${apiKey}`;
     const response = await fetch(ytUrl);
     const data = await response.json();
     return new Response(JSON.stringify(data), {

@@ -263,8 +263,11 @@ const PROMPTS = ["Late night lo-fi 📚","Road trip bangers 🚗","90s hip-hop �
 
 function totalDur(tracks) {
   const s = tracks.reduce((a, t) => {
-    const [m, sec] = (t.duration || "0:00").split(":").map(Number);
-    return a + m * 60 + (sec || 0);
+    const parts = (t.duration || "0:00").split(":");
+    const m = parseInt(parts[0], 10);
+    const sec = parseInt(parts[1], 10);
+    if (isNaN(m)) return a;
+    return a + m * 60 + (isNaN(sec) ? 0 : sec);
   }, 0);
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -272,7 +275,7 @@ function totalDur(tracks) {
 
 async function ytSearch(title, artist) {
   try {
-    const q = encodeURIComponent(`${title} ${artist} official audio`);
+    const q = encodeURIComponent(`${title} ${artist}`);
     const r = await fetch(`/api/youtube-search?q=${q}`);
     const d = await r.json();
     const item = d?.items?.[0];
