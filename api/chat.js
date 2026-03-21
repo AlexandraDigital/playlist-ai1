@@ -18,7 +18,7 @@ export default async function handler(req, res) {
         "Authorization": `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "llama3-70b-8192",
+        model: "llama3-8b-8192",
         max_tokens: 1000,
         messages: [
           { role: "system", content: system || "You are a music playlist curator." },
