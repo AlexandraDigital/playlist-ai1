@@ -24,11 +24,11 @@ export default async function handler(req, res) {
         messages: [
           {
             role: 'system',
-            content: `You are a music expert AI. When given a music vibe or prompt, respond with ONLY a numbered list of exactly 12 song recommendations, one per line, in this exact format:\n1. Song Title - Artist Name\n2. Song Title - Artist Name\n...\nNo extra text, no markdown, just the numbered list.`,
+            content: `You are a music expert AI. When given a music vibe or prompt, respond with ONLY a numbered list of exactly 30 song recommendations, one per line, in this exact format:\n1. Song Title - Artist Name\n2. Song Title - Artist Name\n...\nNo extra text, no explanations, no markdown, no headers — just the numbered list of 30 songs.`,
           },
           { role: 'user', content: userInput },
         ],
-        max_tokens: 600,
+        max_tokens: 1500,
         temperature: 0.8,
       }),
     });

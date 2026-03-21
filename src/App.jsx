@@ -65,7 +65,7 @@ function parseSongs(text) {
       line.match(/^\d*[\.)] *(.+?) +by +(.+)$/i);
     if (m) songs.push({ title: m[1].trim(), artist: m[2].trim(), videoId: null });
   }
-  return songs.slice(0, 15);
+  return songs.slice(0, 50);
 }
 
 // ── Main App ───────────────────────────────────────────────────────
@@ -131,9 +131,42 @@ export default function App() {
       const text = data.content || data.message || data.reply || '';
       const songs = parseSongs(text);
       if (!songs.length) throw new Error('No songs in response — try a different prompt.');
-      setSuggestions(songs); // show immediately
-      // enrich with Spotify album art in background
-      enrichWithSpotify(songs).then(enriched => setSuggestions(enriched));
+      setSuggestions(songs); // show immediately with AI results
+
+      // Enrich with Spotify metadata, then pull Spotify recommendations for even more songs
+      enrichWithSpotify(songs).then(async enriched => {
+        setSuggestions(enriched);
+
+        // Grab up to 5 Spotify track IDs from enriched results to use as recommendation seeds
+        const seeds = enriched
+          .map(s => s.spotifyId)
+          .filter(Boolean)
+          .slice(0, 5);
+
+        if (seeds.length > 0) {
+          try {
+            const recRes = await fetch(
+              `/api/spotify?seeds=${seeds.join(',')}&limit=20`
+            );
+            if (recRes.ok) {
+              const recData = await recRes.json();
+              const recTracks = recData.tracks || [];
+              if (recTracks.length > 0) {
+                setSuggestions(prev => {
+                  // Deduplicate by "title__artist"
+                  const existing = new Set(prev.map(s => `${s.title}__${s.artist}`.toLowerCase()));
+                  const newOnes = recTracks.filter(
+                    t => !existing.has(`${t.title}__${t.artist}`.toLowerCase())
+                  );
+                  return [...prev, ...newOnes];
+                });
+              }
+            }
+          } catch {
+            // Spotify recommendations failed — no big deal, we already have the AI songs
+          }
+        }
+      });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -369,7 +402,7 @@ export default function App() {
           <h2>AI Suggestions {suggestions.length > 0 && <span className="count">{suggestions.length}</span>}</h2>
           {isGenerating ? (
             <div className="loading-grid">
-              {[...Array(8)].map((_, i) => <div key={i} className="skeleton-card" />)}
+              {[...Array(12)].map((_, i) => <div key={i} className="skeleton-card" />)}
             </div>
           ) : suggestions.length === 0 ? (
             <div className="empty-state">
