@@ -1,16 +1,19 @@
-export const config = { maxDuration: 60 };
+export const config = { runtime: 'edge' };
 
 const INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://api.piped.projectsegfau.lt',
   'https://pipedapi.leptons.xyz',
+  'https://pa.il.sable.cc',
 ];
 
-export default async function handler(req, res) {
-  const { videoId } = req.query;
-  if (!videoId) return res.status(400).json({ error: 'videoId required' });
+export default async function handler(req) {
+  const { searchParams } = new URL(req.url);
+  const videoId = searchParams.get('videoId');
+  if (!videoId) {
+    return new Response(JSON.stringify({ error: 'videoId required' }), { status: 400 });
+  }
 
-  let audioUrl, mimeType;
   for (const base of INSTANCES) {
     try {
       const r = await fetch(`${base}/streams/${videoId}`, {
@@ -18,54 +21,18 @@ export default async function handler(req, res) {
       });
       if (!r.ok) continue;
       const data = await r.json();
-      const best = (data.audioStreams || [])
-        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+      const streams = (data.audioStreams || []).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+      // Prefer opus/webm or mp4a for broad browser support
+      const best = streams.find(s => s.mimeType?.includes('mp4')) || streams[0];
       if (best?.url) {
-        audioUrl = best.url;
-        mimeType = best.mimeType || 'audio/webm';
-        break;
+        // Redirect — <audio> elements follow cross-origin redirects without CORS enforcement
+        return Response.redirect(best.url, 302);
       }
-    } catch { /* try next */ }
+    } catch { /* try next instance */ }
   }
 
-  if (!audioUrl) return res.status(500).json({ error: 'No stream available' });
-
-  // Forward Range header so seeking works
-  const fetchHeaders = { 'User-Agent': 'Mozilla/5.0' };
-  const rangeHeader = req.headers['range'];
-  if (rangeHeader) fetchHeaders['Range'] = rangeHeader;
-
-  let audioRes;
-  try {
-    audioRes = await fetch(audioUrl, { headers: fetchHeaders });
-  } catch (e) {
-    return res.status(500).json({ error: `Fetch failed: ${e.message}` });
-  }
-
-  if (!audioRes.ok && audioRes.status !== 206) {
-    return res.status(500).json({ error: `Upstream error ${audioRes.status}` });
-  }
-
-  // Pass through relevant headers
-  res.setHeader('Content-Type', mimeType);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Accept-Ranges', 'bytes');
-
-  const contentLength = audioRes.headers.get('Content-Length');
-  const contentRange = audioRes.headers.get('Content-Range');
-  if (contentLength) res.setHeader('Content-Length', contentLength);
-  if (contentRange) res.setHeader('Content-Range', contentRange);
-
-  res.status(audioRes.status);
-
-  const reader = audioRes.body.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-    }
-  } finally {
-    res.end();
-  }
+  return new Response(JSON.stringify({ error: 'No stream available from any Piped instance' }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }

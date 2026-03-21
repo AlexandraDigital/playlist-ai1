@@ -1,12 +1,18 @@
+export const config = { runtime: 'edge' };
+
 const INSTANCES = [
   'https://pipedapi.kavin.rocks',
   'https://api.piped.projectsegfau.lt',
   'https://pipedapi.leptons.xyz',
+  'https://pa.il.sable.cc',
 ];
 
-export default async function handler(req, res) {
-  const { q } = req.query;
-  if (!q) return res.status(400).json({ error: 'q required' });
+export default async function handler(req) {
+  const { searchParams } = new URL(req.url);
+  const q = searchParams.get('q');
+  if (!q) {
+    return new Response(JSON.stringify({ error: 'q required' }), { status: 400 });
+  }
 
   for (const base of INSTANCES) {
     try {
@@ -16,13 +22,15 @@ export default async function handler(req, res) {
       if (!r.ok) continue;
       const data = await r.json();
       const items = data.items || [];
-      const video = items.find(i => i.url && i.url.includes('watch'));
+      const video = items.find(i => i.url?.includes('watch'));
       if (video) {
         const videoId = new URLSearchParams(video.url.split('?')[1]).get('v') || video.url.split('v=')[1];
-        return res.json({ videoId, title: video.title, thumbnail: video.thumbnail });
+        return new Response(JSON.stringify({ videoId, title: video.title, thumbnail: video.thumbnail }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
     } catch { /* try next */ }
   }
 
-  res.status(404).json({ error: 'Not found' });
+  return new Response(JSON.stringify({ error: 'Not found' }), { status: 404 });
 }
