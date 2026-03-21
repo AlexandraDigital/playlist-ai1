@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
+const PAYPAL_CLIENT_ID = "AXNMWGjP12GGzjRS4hXihdVeXUZNsvT38UqJzJSoI0N9WsV67zo5fyV46CbB5Sp_f2wKnLzvfgyoieI8";
+const FREE_GEN_LIMIT = 3;
+
 /* ── IndexedDB helpers ──────────────────────────────────────── */
 const IDB = {
   _db: null,
@@ -20,7 +23,6 @@ const IDB = {
     const db = await this.open();
     return new Promise((res, rej) => {
       const tx = db.transaction("offline", "readwrite");
-      // Don't store the blobUrl (session-only), store the blob itself
       const { blobUrl, ...toStore } = rec;
       tx.objectStore("offline").put(toStore);
       tx.oncomplete = res; tx.onerror = rej;
@@ -32,7 +34,6 @@ const IDB = {
       const req = db.transaction("offline", "readonly").objectStore("offline").getAll();
       req.onsuccess = () => {
         const records = req.result || [];
-        // Recreate blob URLs from stored audio blobs
         const results = records.map((rec) => {
           if (rec.audioBlob) {
             const url = URL.createObjectURL(rec.audioBlob);
@@ -66,8 +67,23 @@ const STYLES = `
     --text: #fff; --muted: #555; --sub: #888; --font: 'Inter', sans-serif;
   }
   body { background:var(--bg); color:var(--text); font-family:var(--font); min-height:100vh; }
-  .app { display:grid; grid-template-rows:auto auto 1fr auto; height:100vh; max-width:840px; margin:0 auto; }
+  .app { display:grid; grid-template-rows:auto auto 1fr auto; height:100vh; max-width:100%; margin:0 auto; }
   ::-webkit-scrollbar { width:3px; } ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+  @media (min-width:900px) {
+    .header { padding:28px 60px 18px; }
+    .tabs { padding:0 60px; }
+    .scroll-area { padding:0 60px 16px; }
+    .player { padding:16px 60px; }
+    .ai-drawer { padding:16px 60px; }
+    .add-form { padding:16px 60px; }
+    .logo { font-size:36px; }
+    .main-input { font-size:15px; padding:13px 18px; }
+    .gen-btn { padding:13px 30px; font-size:15px; }
+    .track-title { font-size:15px; }
+    .track-artist { font-size:13px; }
+    .tab { font-size:14px; padding:13px 18px; }
+  }
 
   #yt-player-wrap { position:fixed; top:-9999px; left:-9999px; width:320px; height:180px; pointer-events:none; z-index:-1; }
   #yt-player { width:100%; height:100%; }
@@ -115,12 +131,13 @@ const STYLES = `
   .chip { padding:5px 11px; background:var(--card); border:1px solid var(--border); border-radius:20px;
     font-size:12px; color:var(--sub); cursor:pointer; transition:all .15s; font-family:var(--font); }
   .chip:hover { border-color:var(--purple); color:var(--purple-light); }
+  .gen-limit { font-size:11px; color:var(--muted); margin-top:2px; }
 
   /* ADD SONG FORM */
   .add-form { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 24px; display:flex; flex-direction:column; gap:10px; }
-  .add-form-row { display:flex; gap:8px; }
-  .add-input { flex:1; background:var(--card); border:1px solid var(--border); border-radius:8px;
-    padding:9px 12px; font-size:13px; color:var(--text); font-family:var(--font); outline:none; min-width:0; }
+  .add-form-row { display:flex; gap:8px; flex-wrap:wrap; }
+  .add-input { flex:1; min-width:120px; background:var(--card); border:1px solid var(--border); border-radius:8px;
+    padding:9px 12px; font-size:13px; color:var(--text); font-family:var(--font); outline:none; }
   .add-input:focus { border-color:#2a2a2a; }
   .add-input::placeholder { color:var(--muted); }
   .add-submit { padding:9px 18px; background:var(--purple); border:none; border-radius:8px;
@@ -130,11 +147,11 @@ const STYLES = `
 
   /* PLAYLIST AREA */
   .scroll-area { overflow-y:auto; padding:0 24px 12px; }
-  .pl-header { display:flex; align-items:center; justify-content:space-between; padding:14px 0 10px; }
+  .pl-header { display:flex; align-items:center; justify-content:space-between; padding:14px 0 10px; flex-wrap:wrap; gap:8px; }
   .pl-name { background:transparent; border:none; color:var(--text); font-family:var(--font);
     font-size:15px; font-weight:600; outline:none; width:200px; }
   .pl-name::placeholder { color:var(--muted); }
-  .pl-actions { display:flex; gap:6px; align-items:center; }
+  .pl-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
   .icon-btn { padding:7px 12px; background:transparent; border:1px solid var(--border); border-radius:8px;
     color:var(--muted); font-size:12px; cursor:pointer; font-family:var(--font); transition:all .15s; white-space:nowrap; }
   .icon-btn:hover { border-color:#333; color:var(--sub); }
@@ -189,8 +206,41 @@ const STYLES = `
   .save-pl-btn:hover { background:var(--purple2); }
   .save-pl-btn:disabled { opacity:.4; cursor:not-allowed; }
 
+  /* SYNC PANEL */
+  .sync-panel { background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:14px 16px; margin-bottom:14px; display:flex; flex-direction:column; gap:10px; }
+  .sync-panel-title { font-size:13px; font-weight:600; color:var(--purple-light); }
+  .sync-code-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .sync-code { font-size:18px; font-weight:700; letter-spacing:3px; color:var(--text);
+    background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 14px; font-family:monospace; }
+  .sync-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .sync-input { flex:1; min-width:140px; background:var(--card); border:1px solid var(--border); border-radius:8px;
+    padding:8px 12px; font-size:13px; color:var(--text); font-family:var(--font); outline:none; text-transform:uppercase; letter-spacing:2px; }
+  .sync-input::placeholder { letter-spacing:0; text-transform:none; }
+  .sync-btn { padding:8px 14px; background:transparent; border:1px solid var(--border); border-radius:8px;
+    color:var(--sub); font-family:var(--font); font-size:12px; cursor:pointer; white-space:nowrap; transition:all .15s; }
+  .sync-btn:hover { border-color:var(--purple); color:var(--purple-light); }
+  .sync-status { font-size:12px; color:var(--sub); }
+  .sync-status.ok { color:var(--green); }
+  .sync-status.err { color:var(--red); }
+  .pro-lock { display:flex; align-items:center; gap:8px; background:var(--card); border:1px dashed var(--border);
+    border-radius:10px; padding:12px 16px; margin-bottom:14px; cursor:pointer; }
+  .pro-lock:hover { border-color:var(--purple); }
+  .pro-lock-icon { font-size:18px; }
+  .pro-lock-text { font-size:13px; color:var(--sub); }
+  .pro-lock-cta { font-size:12px; color:var(--purple-light); font-weight:500; }
+
+  /* STATS */
+  .stats-panel { display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+  .stats-title { font-size:13px; font-weight:600; color:var(--sub); margin-bottom:4px; }
+  .stats-row { display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--border); }
+  .stats-rank { width:20px; font-size:11px; color:var(--muted); text-align:right; }
+  .stats-info { flex:1; min-width:0; }
+  .stats-song { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stats-artist { font-size:11px; color:var(--sub); }
+  .stats-plays { font-size:12px; color:var(--purple-light); }
+
   /* UPLOAD */
-  .t-btn.upload { }
   .t-btn.upload:hover { border-color:rgba(168,85,247,.4); color:var(--purple-light); }
 
   /* AI SUGGESTIONS */
@@ -221,11 +271,13 @@ const STYLES = `
   .install-btn:hover { border-color:#333; color:var(--sub); }
   .pro-btn { padding:6px 12px; background:linear-gradient(135deg,#a855f7,#7c3aed); border:none; border-radius:8px;
     color:#fff; font-family:var(--font); font-size:12px; font-weight:600; cursor:pointer; letter-spacing:.3px; }
+  .pro-badge { padding:6px 12px; background:linear-gradient(135deg,#a855f7,#7c3aed); border:none; border-radius:8px;
+    color:#fff; font-family:var(--font); font-size:12px; font-weight:600; letter-spacing:.3px; }
 
   /* PRO MODAL */
   .pro-overlay { position:fixed; inset:0; background:rgba(0,0,0,.88); backdrop-filter:blur(10px); z-index:100;
     display:flex; align-items:center; justify-content:center; padding:20px; }
-  .pro-modal { background:#0c0c0c; border:1px solid #2a1f3d; border-radius:20px; width:100%; max-width:380px; overflow:hidden; }
+  .pro-modal { background:#0c0c0c; border:1px solid #2a1f3d; border-radius:20px; width:100%; max-width:420px; overflow:hidden; max-height:90vh; overflow-y:auto; }
   .pro-header { background:linear-gradient(160deg,#1a0a2e,#0d0020,#000); padding:28px 24px 20px; text-align:center; }
   .pro-crown { font-size:38px; margin-bottom:10px; }
   .pro-title { font-size:24px; font-weight:700; letter-spacing:-0.5px;
@@ -242,11 +294,17 @@ const STYLES = `
   .pro-pricing { padding:16px 24px 8px; text-align:center; }
   .pro-price { font-size:30px; font-weight:700; color:var(--text); }
   .pro-price span { font-size:13px; font-weight:400; color:var(--sub); }
+  .pro-one-time { font-size:11px; color:var(--green); margin-top:3px; }
   .pro-actions { padding:14px 24px 22px; display:flex; flex-direction:column; gap:8px; }
   .pro-cta { width:100%; padding:14px; background:linear-gradient(135deg,#a855f7,#7c3aed); border:none; border-radius:12px;
     color:#fff; font-family:var(--font); font-size:15px; font-weight:600; cursor:pointer; }
   .pro-skip { width:100%; padding:10px; background:transparent; border:1px solid var(--border); border-radius:12px;
     color:var(--muted); font-family:var(--font); font-size:13px; cursor:pointer; }
+  .paypal-container { min-height:48px; }
+  .pro-success { text-align:center; padding:40px 24px; }
+  .pro-success-icon { font-size:48px; margin-bottom:12px; }
+  .pro-success-title { font-size:20px; font-weight:700; color:var(--purple-light); margin-bottom:8px; }
+  .pro-success-sub { font-size:13px; color:var(--sub); margin-bottom:20px; }
 
   /* PLAYER BAR */
   .player { background:var(--surface); border-top:1px solid var(--border);
@@ -319,11 +377,16 @@ async function spotifySearch(title, artist) {
   }
 }
 
-/* ── Cobalt download ────────────────────────────────────────── */
+/* ── Audio download via /api/download ───────────────────────── */
 async function downloadAudio(videoId) {
   const r = await fetch(`/api/download?videoId=${videoId}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const blob = await r.blob();
+  const { url } = await r.json();
+  if (!url) throw new Error("No download URL returned");
+  // Fetch audio directly from CDN URL returned by cobalt
+  const audioRes = await fetch(url);
+  if (!audioRes.ok) throw new Error(`Audio fetch failed: ${audioRes.status}`);
+  const blob = await audioRes.blob();
   if (blob.size < 10000) throw new Error("blob too small");
   return blob;
 }
@@ -338,6 +401,38 @@ async function aiChat(messages) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   return d?.content?.[0]?.text || d?.choices?.[0]?.message?.content || "";
+}
+
+/* ── Sync helpers ───────────────────────────────────────────── */
+async function syncPush(code, playlists) {
+  const r = await fetch("/api/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, playlists }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function syncPull(code) {
+  const r = await fetch(`/api/sync?code=${encodeURIComponent(code)}`);
+  if (!r.ok) throw new Error(r.status === 404 ? "No playlists found for this code" : `HTTP ${r.status}`);
+  return r.json();
+}
+
+/* ── Free gen counter helpers ───────────────────────────────── */
+function getGenCount() {
+  try {
+    const data = JSON.parse(localStorage.getItem("playlist-ai-gen") || "{}");
+    const today = new Date().toDateString();
+    return data.date === today ? (data.count || 0) : 0;
+  } catch { return 0; }
+}
+
+function bumpGenCount() {
+  const count = getGenCount() + 1;
+  localStorage.setItem("playlist-ai-gen", JSON.stringify({ date: new Date().toDateString(), count }));
+  return count;
 }
 
 const CHIPS = ["chill vibes", "hype workout", "late night drive", "sad hours", "focus mode", "k-pop bops"];
@@ -361,10 +456,31 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem("saved-playlists") || "[]"); } catch { return []; }
   });
   const [newPlName, setNewPlName] = useState("");
-  const [aiSuggestions, setAiSuggestions] = useState([]); // songs AI suggested, not yet added
-  const [aiSelected, setAiSelected] = useState(new Set()); // indices of selected suggestions
+  const [aiSuggestions, setAiSuggestions] = useState([]);
+  const [aiSelected, setAiSelected] = useState(new Set());
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showPro, setShowPro] = useState(false);
+
+  // Pro state
+  const [isPro, setIsPro] = useState(() => localStorage.getItem("playlist-ai-pro") === "true");
+  const [aiGenCount, setAiGenCount] = useState(getGenCount);
+
+  // Sync state
+  const [syncCode] = useState(() => {
+    let code = localStorage.getItem("playlist-ai-sync-code");
+    if (!code) {
+      code = Math.random().toString(36).slice(2, 8).toUpperCase();
+      localStorage.setItem("playlist-ai-sync-code", code);
+    }
+    return code;
+  });
+  const [importCode, setImportCode] = useState("");
+  const [syncStatus, setSyncStatus] = useState({ msg: "", type: "" });
+
+  // Listening stats
+  const [stats, setStats] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("playlist-ai-stats") || "{}"); } catch { return {}; }
+  });
 
   const ytPlayerRef = useRef(null);
   const ytReadyRef = useRef(false);
@@ -374,23 +490,33 @@ export default function App() {
   const autoSaveTimerRef = useRef(null);
   const uploadFileRef = useRef(null);
   const uploadTargetRef = useRef(null);
+  const paypalContainerRef = useRef(null);
+  const paypalBtnRenderedRef = useRef(false);
+  const currentIdxRef = useRef(currentIdx);
+  const playingRef = useRef(playing);
+  const isProRef = useRef(isPro);
+  const tabRef = useRef(tab);
 
   useEffect(() => { playlistRef.current = playlist; }, [playlist]);
+  useEffect(() => { currentIdxRef.current = currentIdx; }, [currentIdx]);
+  useEffect(() => { playingRef.current = playing; }, [playing]);
+  useEffect(() => { isProRef.current = isPro; }, [isPro]);
+  useEffect(() => { tabRef.current = tab; }, [tab]);
 
   // PWA install prompt
   useEffect(() => {
     const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
-    window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  // Media Session action handlers (lock screen controls)
+  // Media Session action handlers
   useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.setActionHandler('play', () => togglePlay());
-    navigator.mediaSession.setActionHandler('pause', () => togglePlay());
-    navigator.mediaSession.setActionHandler('nexttrack', () => skipNext());
-    navigator.mediaSession.setActionHandler('previoustrack', () => skipPrev());
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.setActionHandler("play", () => togglePlay());
+    navigator.mediaSession.setActionHandler("pause", () => togglePlay());
+    navigator.mediaSession.setActionHandler("nexttrack", () => skipNext());
+    navigator.mediaSession.setActionHandler("previoustrack", () => skipPrev());
   }, []);
 
   // Load offline tracks
@@ -410,10 +536,7 @@ export default function App() {
         height: "180", width: "320",
         playerVars: { autoplay: 1, controls: 0, playsinline: 1, mute: 0 },
         events: {
-          onReady: (e) => {
-            e.target.setVolume(100);
-            e.target.unMute();
-          },
+          onReady: (e) => { e.target.setVolume(100); e.target.unMute(); },
           onStateChange: (e) => {
             if (e.data === window.YT.PlayerState.PLAYING) setPlaying(true);
             if (e.data === window.YT.PlayerState.PAUSED) setPlaying(false);
@@ -424,34 +547,140 @@ export default function App() {
     };
   }, []);
 
+  // PayPal SDK load when Pro modal opens
+  useEffect(() => {
+    if (!showPro || isPro) return;
+    paypalBtnRenderedRef.current = false;
+
+    const renderBtn = () => {
+      if (!paypalContainerRef.current || paypalBtnRenderedRef.current) return;
+      paypalBtnRenderedRef.current = true;
+      // Clear container to avoid double-render
+      paypalContainerRef.current.innerHTML = "";
+      window.paypal.Buttons({
+        createOrder: (data, actions) =>
+          actions.order.create({
+            purchase_units: [{
+              amount: { value: "9.99", currency_code: "USD" },
+              description: "Playlist AI Pro – Lifetime Access",
+            }],
+          }),
+        onApprove: async (data) => {
+          try {
+            const res = await fetch("/api/paypal-verify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ orderID: data.orderID }),
+            });
+            const result = await res.json();
+            if (result.success) {
+              localStorage.setItem("playlist-ai-pro", "true");
+              setIsPro(true);
+            } else {
+              alert("Payment could not be verified. Please contact support.");
+            }
+          } catch {
+            alert("Verification error. Please contact support.");
+          }
+        },
+        onError: () => alert("PayPal encountered an error. Please try again."),
+        style: { layout: "vertical", color: "gold", shape: "rect", label: "pay" },
+      }).render(paypalContainerRef.current);
+    };
+
+    if (window.paypal) {
+      renderBtn();
+    } else {
+      const script = document.createElement("script");
+      script.src = `https://www.paypal.com/sdk/js?client-id=${PAYPAL_CLIENT_ID}&currency=USD&intent=capture`;
+      script.onload = renderBtn;
+      document.head.appendChild(script);
+    }
+  }, [showPro, isPro]);
+
+  // Background playback fix: when tab hidden, switch to offline blob if available
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden || !playingRef.current) return;
+      const idx = currentIdxRef.current;
+      if (idx === null) return;
+      const list = playlistRef.current;
+      const track = list[idx];
+      if (!track?.videoId) return;
+
+      const blobUrl = blobUrlsRef.current[track.videoId];
+      if (blobUrl) {
+        // Switch from YouTube IFrame to local Audio (browsers throttle iframes less audio elements)
+        const currentTime = ytPlayerRef.current?.getCurrentTime?.() || 0;
+        ytPlayerRef.current?.pauseVideo?.();
+        if (audioRef.current) { audioRef.current.pause(); }
+        const a = new Audio(blobUrl);
+        audioRef.current = a;
+        a.currentTime = currentTime;
+        a.play().catch(() => {});
+        a.onended = () => skipNext();
+      }
+      // If no blob and Pro: the auto-download already started when track began
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
   const currentTrack = tab === "offline"
     ? offlineTracks[currentIdx] || null
     : playlist[currentIdx] || null;
 
+  /* ── Download & save ────────────────────────────────────────── */
+  const downloadAndSave = useCallback(async (track) => {
+    if (!track.videoId) return;
+    if (dlStatus[track.videoId] === "loading") return;
+    setDlStatus((s) => ({ ...s, [track.videoId]: "loading" }));
+    try {
+      const blob = await downloadAudio(track.videoId);
+      const url = URL.createObjectURL(blob);
+      blobUrlsRef.current[track.videoId] = url;
+      setDlStatus((s) => ({ ...s, [track.videoId]: "done" }));
+      const rec = {
+        videoId: track.videoId, title: track.title, artist: track.artist,
+        thumbnail: track.thumbnail, duration: track.duration, audioBlob: blob,
+      };
+      await IDB.save(rec);
+      setOfflineTracks(await IDB.getAll());
+    } catch {
+      setDlStatus((s) => ({ ...s, [track.videoId]: "error" }));
+    }
+  }, [dlStatus]);
+
   /* ── Play track ─────────────────────────────────────────────── */
   const playTrack = useCallback((idx, trackList) => {
-    const list = trackList || (tab === "offline" ? offlineTracks : playlistRef.current);
+    const list = trackList || (tabRef.current === "offline" ? offlineTracks : playlistRef.current);
     const t = list[idx];
     if (!t) return;
     setCurrentIdx(idx);
     setPlaying(true);
 
-    // Media Session: lock screen / notification controls
-    if ('mediaSession' in navigator) {
+    // Listening stats
+    setStats((prev) => {
+      const key = t.videoId || t.title;
+      const updated = { ...prev, [key]: { ...(prev[key] || {}), plays: (prev[key]?.plays || 0) + 1, title: t.title, artist: t.artist } };
+      localStorage.setItem("playlist-ai-stats", JSON.stringify(updated));
+      return updated;
+    });
+
+    // Media Session
+    if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
-        title: t.title || 'Unknown',
-        artist: t.artist || '',
-        album: 'Playlist AI',
-        artwork: t.thumbnail
-          ? [{ src: t.thumbnail, sizes: '640x640', type: 'image/jpeg' }]
-          : [],
+        title: t.title || "Unknown",
+        artist: t.artist || "",
+        album: "Playlist AI",
+        artwork: t.thumbnail ? [{ src: t.thumbnail, sizes: "640x640", type: "image/jpeg" }] : [],
       });
-      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.playbackState = "playing";
     }
 
     clearTimeout(autoSaveTimerRef.current);
 
-    // Offline blob
+    // Offline blob available
     if (t.blobUrl || blobUrlsRef.current[t.videoId]) {
       const url = t.blobUrl || blobUrlsRef.current[t.videoId];
       if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
@@ -474,27 +703,30 @@ export default function App() {
         doPlay(ytPlayerRef.current);
       } else {
         const check = setInterval(() => {
-          if (ytPlayerRef.current?.loadVideoById) {
-            doPlay(ytPlayerRef.current);
-            clearInterval(check);
-          }
+          if (ytPlayerRef.current?.loadVideoById) { doPlay(ytPlayerRef.current); clearInterval(check); }
         }, 200);
       }
-      // Auto-save after 4s
-      autoSaveTimerRef.current = setTimeout(() => {
+
+      // Pro: download immediately so background switch is ready fast
+      // Free: 4s delay
+      if (isProRef.current) {
         if (!blobUrlsRef.current[t.videoId]) downloadAndSave(t);
-      }, 4000);
+      } else {
+        autoSaveTimerRef.current = setTimeout(() => {
+          if (!blobUrlsRef.current[t.videoId]) downloadAndSave(t);
+        }, 4000);
+      }
     }
-  }, [tab, offlineTracks]);
+  }, [offlineTracks, downloadAndSave]);
 
   const skipNext = useCallback(() => {
-    const list = tab === "offline" ? offlineTracks : playlistRef.current;
+    const list = tabRef.current === "offline" ? offlineTracks : playlistRef.current;
     setCurrentIdx((i) => {
       const next = (i ?? -1) + 1;
       if (next < list.length) { setTimeout(() => playTrack(next, list), 100); return next; }
       setPlaying(false); return i;
     });
-  }, [tab, offlineTracks, playTrack]);
+  }, [offlineTracks, playTrack]);
 
   const skipPrev = useCallback(() => {
     setCurrentIdx((i) => {
@@ -514,28 +746,6 @@ export default function App() {
       playing ? ytPlayerRef.current.pauseVideo() : ytPlayerRef.current.playVideo();
     }
   }, [currentIdx, playing, playTrack]);
-
-  /* ── Download & save ────────────────────────────────────────── */
-  const downloadAndSave = useCallback(async (track) => {
-    if (!track.videoId) return;
-    if (dlStatus[track.videoId] === "loading") return;
-    setDlStatus((s) => ({ ...s, [track.videoId]: "loading" }));
-    try {
-      const blob = await downloadAudio(track.videoId);
-      const url = URL.createObjectURL(blob);
-      blobUrlsRef.current[track.videoId] = url;
-      setDlStatus((s) => ({ ...s, [track.videoId]: "done" }));
-      const rec = {
-        videoId: track.videoId, title: track.title, artist: track.artist,
-        thumbnail: track.thumbnail, duration: track.duration,
-        audioBlob: blob, // store actual blob so it survives page reloads
-      };
-      await IDB.save(rec);
-      setOfflineTracks(await IDB.getAll());
-    } catch {
-      setDlStatus((s) => ({ ...s, [track.videoId]: "error" }));
-    }
-  }, [dlStatus]);
 
   /* ── Add track ──────────────────────────────────────────────── */
   const addTrack = useCallback(async (track) => {
@@ -574,6 +784,13 @@ export default function App() {
   const sendAI = useCallback(async (userMsg) => {
     const msg = userMsg || aiInput.trim();
     if (!msg || aiLoading) return;
+
+    // Free tier gate
+    if (!isPro && aiGenCount >= FREE_GEN_LIMIT) {
+      setShowPro(true);
+      return;
+    }
+
     setAiInput("");
     setAiLoading(true);
     setShowAI(true);
@@ -602,22 +819,24 @@ Include 6-10 songs. No explanations, just the JSON array.`;
       setAiMsgs([...newMsgs, { role: "assistant", content: displayReply }]);
       if (songs.length) {
         setAiSuggestions(songs);
-        setAiSelected(new Set(songs.map((_, i) => i))); // all selected by default
+        setAiSelected(new Set(songs.map((_, i) => i)));
+      }
+
+      // Bump free counter
+      if (!isPro) {
+        const newCount = bumpGenCount();
+        setAiGenCount(newCount);
       }
     } catch (e) {
       setAiMsgs([...newMsgs, { role: "assistant", content: `Error: ${e.message}` }]);
     } finally {
       setAiLoading(false);
     }
-  }, [aiInput, aiLoading, aiMsgs, addTrack]);
+  }, [aiInput, aiLoading, aiMsgs, isPro, aiGenCount]);
 
   const handleGenerate = () => {
-    if (query.trim()) {
-      sendAI(query.trim());
-      setQuery("");
-    } else {
-      setShowAI((v) => !v);
-    }
+    if (query.trim()) { sendAI(query.trim()); setQuery(""); }
+    else setShowAI((v) => !v);
   };
 
   /* ── Add song form submit ────────────────────────────────────── */
@@ -636,11 +855,8 @@ Include 6-10 songs. No explanations, just the JSON array.`;
     e.target.value = "";
     const target = uploadTargetRef.current;
     if (!target) return;
-
     const url = URL.createObjectURL(file);
-
     if (target.isNew) {
-      // New offline track from Downloads tab upload
       const title = file.name.replace(/\.[^/.]+$/, "");
       const videoId = `upload_${Date.now()}`;
       blobUrlsRef.current[videoId] = url;
@@ -648,15 +864,11 @@ Include 6-10 songs. No explanations, just the JSON array.`;
       await IDB.save(rec);
       setOfflineTracks(await IDB.getAll());
     } else {
-      // Attach audio to existing playlist track
       const t = target.track;
       const videoId = t.videoId || `upload_${Date.now()}`;
       blobUrlsRef.current[videoId] = url;
       setDlStatus((s) => ({ ...s, [videoId]: "done" }));
-      const rec = {
-        videoId, title: t.title, artist: t.artist,
-        thumbnail: t.thumbnail, duration: t.duration, audioBlob: file,
-      };
+      const rec = { videoId, title: t.title, artist: t.artist, thumbnail: t.thumbnail, duration: t.duration, audioBlob: file };
       await IDB.save(rec);
       setOfflineTracks(await IDB.getAll());
       if (!t.videoId) setPlaylist((p) => p.map((x) => x.id === t.id ? { ...x, videoId } : x));
@@ -700,6 +912,36 @@ Include 6-10 songs. No explanations, just the JSON array.`;
     setTab("playlist");
   }, [newPlName]);
 
+  /* ── Cross-device sync ──────────────────────────────────────── */
+  const handlePushSync = useCallback(async () => {
+    if (!savedPlaylists.length) { setSyncStatus({ msg: "No playlists to sync", type: "err" }); return; }
+    setSyncStatus({ msg: "Syncing…", type: "" });
+    try {
+      await syncPush(syncCode, savedPlaylists);
+      setSyncStatus({ msg: "✓ Synced successfully!", type: "ok" });
+    } catch (e) {
+      setSyncStatus({ msg: `Error: ${e.message}`, type: "err" });
+    }
+  }, [syncCode, savedPlaylists]);
+
+  const handlePullSync = useCallback(async () => {
+    const code = importCode.trim().toUpperCase();
+    if (!code) { setSyncStatus({ msg: "Enter a sync code", type: "err" }); return; }
+    setSyncStatus({ msg: "Loading…", type: "" });
+    try {
+      const data = await syncPull(code);
+      const remote = data.playlists || [];
+      if (!remote.length) { setSyncStatus({ msg: "No playlists found for that code", type: "err" }); return; }
+      const merged = [...remote, ...savedPlaylists.filter((p) => !remote.find((r) => r.name === p.name))];
+      setSavedPlaylists(merged);
+      localStorage.setItem("saved-playlists", JSON.stringify(merged));
+      setSyncStatus({ msg: `✓ Loaded ${remote.length} playlist${remote.length !== 1 ? "s" : ""}!`, type: "ok" });
+      setImportCode("");
+    } catch (e) {
+      setSyncStatus({ msg: `Error: ${e.message}`, type: "err" });
+    }
+  }, [importCode, savedPlaylists]);
+
   /* ── Render track row ───────────────────────────────────────── */
   const renderRow = (t, idx, isOffline = false) => {
     const isPlaying = currentIdx === idx && playing && tab === (isOffline ? "offline" : "playlist");
@@ -712,9 +954,7 @@ Include 6-10 songs. No explanations, just the JSON array.`;
         className={`track-row${isPlaying ? " playing" : ""}`}
         onClick={() => { setTab(isOffline ? "offline" : "playlist"); playTrack(idx); }}
       >
-        <div className="track-num">
-          {isPlaying ? "▶" : idx + 1}
-        </div>
+        <div className="track-num">{isPlaying ? "▶" : idx + 1}</div>
 
         {t.thumbnail ? (
           <img className="track-thumb" src={t.thumbnail} alt="" />
@@ -730,13 +970,8 @@ Include 6-10 songs. No explanations, just the JSON array.`;
           <div className="track-artist">{t.artist || "—"}</div>
         </div>
 
-        {t.ytStatus === "searching" && (
-          <span className="track-status">searching…</span>
-        )}
-        {t.ytStatus === "notfound" && (
-          <span className="track-status">not found</span>
-        )}
-
+        {t.ytStatus === "searching" && <span className="track-status">searching…</span>}
+        {t.ytStatus === "notfound" && <span className="track-status">not found</span>}
         {t.duration && <div className="track-dur">{t.duration}</div>}
 
         <div className="track-actions" onClick={(e) => e.stopPropagation()}>
@@ -751,52 +986,40 @@ Include 6-10 songs. No explanations, just the JSON array.`;
             </button>
           )}
           {!isOffline && t.ytStatus === "notfound" && (
-            <button
-              className="t-btn retry"
-              title="Retry search"
-              onClick={() => {
-                setPlaylist((p) => p.map((x) => x.id === t.id ? { ...x, ytStatus: "searching" } : x));
-                ytSearch(t.title, t.artist).then((yt) => {
-                  if (yt?.videoId) setPlaylist((p) => p.map((x) => x.id === t.id ? { ...x, videoId: yt.videoId, thumbnail: x.thumbnail || yt.thumbnail, ytStatus: "found" } : x));
-                });
-              }}
-            >↺</button>
+            <button className="t-btn retry" title="Retry search" onClick={() => {
+              setPlaylist((p) => p.map((x) => x.id === t.id ? { ...x, ytStatus: "searching" } : x));
+              ytSearch(t.title, t.artist).then((yt) => {
+                if (yt?.videoId) setPlaylist((p) => p.map((x) => x.id === t.id ? { ...x, videoId: yt.videoId, thumbnail: x.thumbnail || yt.thumbnail, ytStatus: "found" } : x));
+              });
+            }}>↺</button>
           )}
           {!isOffline && (
-            <button
-              className="t-btn upload"
-              title="Upload audio file"
-              onClick={() => { uploadTargetRef.current = { track: t }; uploadFileRef.current?.click(); }}
-            >⬆</button>
+            <button className="t-btn upload" title="Upload audio file"
+              onClick={() => { uploadTargetRef.current = { track: t }; uploadFileRef.current?.click(); }}>⬆</button>
           )}
-          <button
-            className="t-btn remove"
-            title="Remove"
-            onClick={() => {
-              if (isOffline) {
-                IDB.del(t.videoId).then(() => IDB.getAll().then(setOfflineTracks));
-              } else {
-                setPlaylist((p) => p.filter((_, i) => i !== idx));
-              }
-            }}
-          >×</button>
+          <button className="t-btn remove" title="Remove" onClick={() => {
+            if (isOffline) {
+              IDB.del(t.videoId).then(() => IDB.getAll().then(setOfflineTracks));
+            } else {
+              setPlaylist((p) => p.filter((_, i) => i !== idx));
+            }
+          }}>×</button>
         </div>
       </div>
     );
   };
+
+  /* ── Stats top tracks ───────────────────────────────────────── */
+  const topTracks = Object.entries(stats)
+    .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0))
+    .slice(0, 8);
 
   /* ── Render ─────────────────────────────────────────────────── */
   return (
     <>
       <style>{STYLES}</style>
       <div id="yt-player-wrap"><div id="yt-player" /></div>
-      <input
-        ref={uploadFileRef}
-        type="file"
-        accept="audio/*"
-        style={{ display: "none" }}
-        onChange={handleUploadFile}
-      />
+      <input ref={uploadFileRef} type="file" accept="audio/*" style={{ display: "none" }} onChange={handleUploadFile} />
 
       <div className="app">
         {/* HEADER */}
@@ -805,16 +1028,17 @@ Include 6-10 songs. No explanations, just the JSON array.`;
             <div className="logo">Playlist AI</div>
             <div className="header-badges">
               {installPrompt && (
-                <button
-                  className="install-btn"
-                  onClick={async () => {
-                    installPrompt.prompt();
-                    const { outcome } = await installPrompt.userChoice;
-                    if (outcome === 'accepted') setInstallPrompt(null);
-                  }}
-                >⬇ Install</button>
+                <button className="install-btn" onClick={async () => {
+                  installPrompt.prompt();
+                  const { outcome } = await installPrompt.userChoice;
+                  if (outcome === "accepted") setInstallPrompt(null);
+                }}>⬇ Install</button>
               )}
-              <button className="pro-btn" onClick={() => setShowPro(true)}>✦ Pro</button>
+              {isPro ? (
+                <span className="pro-badge">👑 Pro</span>
+              ) : (
+                <button className="pro-btn" onClick={() => setShowPro(true)}>✦ Pro</button>
+              )}
             </div>
           </div>
           <div className="input-row">
@@ -829,6 +1053,13 @@ Include 6-10 songs. No explanations, just the JSON array.`;
               {aiLoading ? "…" : "Generate"}
             </button>
           </div>
+          {!isPro && (
+            <div className="gen-limit">
+              {Math.max(0, FREE_GEN_LIMIT - aiGenCount)} free generation{aiGenCount >= FREE_GEN_LIMIT - 1 ? "" : "s"} left today
+              {aiGenCount >= FREE_GEN_LIMIT && " — "}
+              {aiGenCount >= FREE_GEN_LIMIT && <span style={{ color: "var(--purple-light)", cursor: "pointer" }} onClick={() => setShowPro(true)}>Upgrade to Pro for unlimited →</span>}
+            </div>
+          )}
         </div>
 
         {/* TABS */}
@@ -842,6 +1073,11 @@ Include 6-10 songs. No explanations, just the JSON array.`;
           <button className={`tab${tab === "myplaylists" ? " active" : ""}`} onClick={() => setTab("myplaylists")}>
             My Playlists {savedPlaylists.length > 0 && <span className="tab-badge">{savedPlaylists.length}</span>}
           </button>
+          {isPro && topTracks.length > 0 && (
+            <button className={`tab${tab === "stats" ? " active" : ""}`} onClick={() => setTab("stats")}>
+              Stats
+            </button>
+          )}
         </div>
 
         {/* AI DRAWER */}
@@ -858,24 +1094,19 @@ Include 6-10 songs. No explanations, just the JSON array.`;
             )}
             {aiMsgs.length === 0 && (
               <div className="chip-row">
-                {CHIPS.map((c) => (
-                  <button key={c} className="chip" onClick={() => sendAI(c)}>{c}</button>
-                ))}
+                {CHIPS.map((c) => <button key={c} className="chip" onClick={() => sendAI(c)}>{c}</button>)}
               </div>
             )}
             {aiSuggestions.length > 0 && (
               <>
                 <div className="suggest-list">
                   {aiSuggestions.map((s, i) => (
-                    <div
-                      key={i}
-                      className={`suggest-row${aiSelected.has(i) ? " selected" : ""}`}
+                    <div key={i} className={`suggest-row${aiSelected.has(i) ? " selected" : ""}`}
                       onClick={() => setAiSelected((prev) => {
                         const next = new Set(prev);
                         next.has(i) ? next.delete(i) : next.add(i);
                         return next;
-                      })}
-                    >
+                      })}>
                       <div className="suggest-check">{aiSelected.has(i) ? "✓" : ""}</div>
                       <div className="suggest-song">
                         <div className="suggest-title">{s.title}</div>
@@ -886,31 +1117,21 @@ Include 6-10 songs. No explanations, just the JSON array.`;
                   ))}
                 </div>
                 <div className="suggest-actions">
-                  <button
-                    className="suggest-add-btn"
-                    disabled={aiSelected.size === 0}
+                  <button className="suggest-add-btn" disabled={aiSelected.size === 0}
                     onClick={() => {
                       const toAdd = aiSuggestions.filter((_, i) => aiSelected.has(i));
                       toAdd.forEach((s) => addTrack(s));
                       setAiSuggestions([]);
                       setAiSelected(new Set());
                       setTab("playlist");
-                    }}
-                  >
+                    }}>
                     Add {aiSelected.size} song{aiSelected.size !== 1 ? "s" : ""} →
                   </button>
-                  <button
-                    className="suggest-all-btn"
-                    onClick={() => setAiSelected(new Set(aiSuggestions.map((_, i) => i)))}
-                  >All</button>
-                  <button
-                    className="suggest-all-btn"
-                    onClick={() => setAiSelected(new Set())}
-                  >None</button>
+                  <button className="suggest-all-btn" onClick={() => setAiSelected(new Set(aiSuggestions.map((_, i) => i)))}>All</button>
+                  <button className="suggest-all-btn" onClick={() => setAiSelected(new Set())}>None</button>
                 </div>
               </>
             )}
-
             <div className="ai-input-row">
               <input
                 className="ai-input"
@@ -938,7 +1159,7 @@ Include 6-10 songs. No explanations, just the JSON array.`;
                 onChange={(e) => setAddForm((f) => ({ ...f, artist: e.target.value }))}
                 onKeyDown={(e) => e.key === "Enter" && submitAdd()} />
               <input className="add-input" placeholder="Duration (e.g. 3:24)" value={addForm.duration}
-                style={{ maxWidth: 120 }}
+                style={{ maxWidth: 140 }}
                 onChange={(e) => setAddForm((f) => ({ ...f, duration: e.target.value }))}
                 onKeyDown={(e) => e.key === "Enter" && submitAdd()} />
             </div>
@@ -956,18 +1177,10 @@ Include 6-10 songs. No explanations, just the JSON array.`;
               <div className="pl-header">
                 <input className="pl-name" value={plName} onChange={(e) => setPlName(e.target.value)} />
                 <div className="pl-actions">
-                  <button className="icon-btn" onClick={() => { setShowAdd((v) => !v); setShowAI(false); }}>
-                    + Add Song
-                  </button>
+                  <button className="icon-btn" onClick={() => { setShowAdd((v) => !v); setShowAI(false); }}>+ Add Song</button>
+                  {playlist.length > 0 && <button className="save-pl-btn" onClick={savePlaylist}>Save ✦</button>}
                   {playlist.length > 0 && (
-                    <button className="save-pl-btn" onClick={savePlaylist} title="Save playlist to My Playlists">
-                      Save ✦
-                    </button>
-                  )}
-                  {playlist.length > 0 && (
-                    <button className="icon-btn danger" onClick={() => { setPlaylist([]); setCurrentIdx(null); }}>
-                      Clear
-                    </button>
+                    <button className="icon-btn danger" onClick={() => { setPlaylist([]); setCurrentIdx(null); }}>Clear</button>
                   )}
                 </div>
               </div>
@@ -988,10 +1201,7 @@ Include 6-10 songs. No explanations, just the JSON array.`;
               <div className="pl-header">
                 <span style={{ fontSize: 15, fontWeight: 600 }}>Downloads</span>
                 <div className="pl-actions">
-                  <button
-                    className="icon-btn"
-                    onClick={() => { uploadTargetRef.current = { isNew: true }; uploadFileRef.current?.click(); }}
-                  >
+                  <button className="icon-btn" onClick={() => { uploadTargetRef.current = { isNew: true }; uploadFileRef.current?.click(); }}>
                     + Upload File
                   </button>
                 </div>
@@ -1000,7 +1210,9 @@ Include 6-10 songs. No explanations, just the JSON array.`;
                 <div className="empty">
                   <div className="empty-icon">⚡</div>
                   <div className="empty-text">No offline tracks yet</div>
-                  <div className="empty-sub">Hit ⬇ or ⬆ on any song, or upload a file above</div>
+                  <div className="empty-sub">
+                    {isPro ? "Songs auto-download as you play them" : "Hit ⬇ on any song to save it offline"}
+                  </div>
                 </div>
               ) : (
                 offlineTracks.map((t, i) => renderRow(t, i, true))
@@ -1013,17 +1225,48 @@ Include 6-10 songs. No explanations, just the JSON array.`;
               <div className="pl-header">
                 <span style={{ fontSize: 15, fontWeight: 600 }}>My Playlists</span>
               </div>
+
+              {/* Cross-device sync (Pro) */}
+              {isPro ? (
+                <div className="sync-panel">
+                  <div className="sync-panel-title">🔄 Cross-Device Sync</div>
+                  <div className="sync-code-row">
+                    <span style={{ fontSize: 12, color: "var(--sub)" }}>Your sync code:</span>
+                    <span className="sync-code">{syncCode}</span>
+                    <button className="sync-btn" onClick={() => { navigator.clipboard.writeText(syncCode); setSyncStatus({ msg: "Copied!", type: "ok" }); }}>Copy</button>
+                    <button className="sync-btn" onClick={handlePushSync}>↑ Push</button>
+                  </div>
+                  <div className="sync-row">
+                    <input
+                      className="sync-input"
+                      placeholder="Enter code to import…"
+                      value={importCode}
+                      onChange={(e) => setImportCode(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => e.key === "Enter" && handlePullSync()}
+                      maxLength={6}
+                    />
+                    <button className="sync-btn" onClick={handlePullSync}>↓ Pull Sync</button>
+                  </div>
+                  {syncStatus.msg && <span className={`sync-status${syncStatus.type ? ` ${syncStatus.type}` : ""}`}>{syncStatus.msg}</span>}
+                </div>
+              ) : (
+                <div className="pro-lock" onClick={() => setShowPro(true)}>
+                  <span className="pro-lock-icon">🔄</span>
+                  <div>
+                    <div className="pro-lock-text">Cross-device sync — access playlists on any device</div>
+                    <div className="pro-lock-cta">Upgrade to Pro →</div>
+                  </div>
+                </div>
+              )}
+
               {/* New playlist form */}
               <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                <input
-                  className="add-input"
-                  placeholder="New playlist name…"
-                  value={newPlName}
+                <input className="add-input" placeholder="New playlist name…" value={newPlName}
                   onChange={(e) => setNewPlName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && createNewPlaylist()}
-                />
+                  onKeyDown={(e) => e.key === "Enter" && createNewPlaylist()} />
                 <button className="save-pl-btn" onClick={createNewPlaylist}>+ New</button>
               </div>
+
               {savedPlaylists.length === 0 ? (
                 <div className="empty">
                   <div className="empty-icon">🎵</div>
@@ -1041,11 +1284,37 @@ Include 6-10 songs. No explanations, just the JSON array.`;
                       </div>
                       <div className="pl-card-actions" onClick={(e) => e.stopPropagation()}>
                         <button className="save-pl-btn" onClick={() => loadPlaylist(pl)}>Load</button>
-                        <button
-                          className="icon-btn danger"
-                          onClick={() => deletePlaylist(pl.id)}
-                        >✕</button>
+                        <button className="icon-btn danger" onClick={() => deletePlaylist(pl.id)}>✕</button>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {tab === "stats" && isPro && (
+            <>
+              <div className="pl-header">
+                <span style={{ fontSize: 15, fontWeight: 600 }}>📊 Listening Stats</span>
+              </div>
+              {topTracks.length === 0 ? (
+                <div className="empty">
+                  <div className="empty-icon">📊</div>
+                  <div className="empty-text">No plays yet</div>
+                  <div className="empty-sub">Start listening to see your top tracks</div>
+                </div>
+              ) : (
+                <div className="stats-panel">
+                  <div className="stats-title">Your top tracks</div>
+                  {topTracks.map(([, data], i) => (
+                    <div key={i} className="stats-row">
+                      <div className="stats-rank">{i + 1}</div>
+                      <div className="stats-info">
+                        <div className="stats-song">{data.title}</div>
+                        <div className="stats-artist">{data.artist}</div>
+                      </div>
+                      <div className="stats-plays">{data.plays} play{data.plays !== 1 ? "s" : ""}</div>
                     </div>
                   ))}
                 </div>
@@ -1082,42 +1351,49 @@ Include 6-10 songs. No explanations, just the JSON array.`;
       {showPro && (
         <div className="pro-overlay" onClick={() => setShowPro(false)}>
           <div className="pro-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="pro-header">
-              <div className="pro-crown">👑</div>
-              <div className="pro-title">Playlist AI Pro</div>
-              <div className="pro-subtitle">Unlock the full experience</div>
-            </div>
-            <div className="pro-features">
-              {[
-                ['🎵', 'Unlimited AI Generations', 'No limits on playlist creation'],
-                ['🎧', 'Smart Mood Detection', 'BPM matching & energy analysis'],
-                ['🔄', 'Cross-device Sync', 'Your playlists on every device'],
-                ['👥', 'Collaborative Playlists', 'Share & edit with friends'],
-                ['📊', 'Listening Stats', 'Track your music habits'],
-                ['⚡', 'Auto-offline Everything', 'Auto-save all songs as you play'],
-              ].map(([icon, name, desc]) => (
-                <div key={name} className="pro-feat">
-                  <div className="pro-feat-icon">{icon}</div>
-                  <div className="pro-feat-text">
-                    <div className="pro-feat-name">{name}</div>
-                    <div className="pro-feat-desc">{desc}</div>
-                  </div>
+            {isPro ? (
+              <div className="pro-success">
+                <div className="pro-success-icon">👑</div>
+                <div className="pro-success-title">You're Pro!</div>
+                <div className="pro-success-sub">All features are unlocked. Enjoy unlimited music ✦</div>
+                <button className="pro-cta" onClick={() => setShowPro(false)}>Let's Go →</button>
+              </div>
+            ) : (
+              <>
+                <div className="pro-header">
+                  <div className="pro-crown">👑</div>
+                  <div className="pro-title">Playlist AI Pro</div>
+                  <div className="pro-subtitle">Unlock the full experience — one time, forever</div>
                 </div>
-              ))}
-            </div>
-            <div className="pro-divider" />
-            <div className="pro-pricing">
-              <div className="pro-price">$4.99 <span>/ month</span></div>
-            </div>
-            <div className="pro-actions">
-              <button
-                className="pro-cta"
-                onClick={() => alert('Coming soon! Pro payments launching shortly 🚀')}
-              >
-                Get Pro →
-              </button>
-              <button className="pro-skip" onClick={() => setShowPro(false)}>Maybe later</button>
-            </div>
+                <div className="pro-features">
+                  {[
+                    ["🎵", "Unlimited AI Generations", "No daily limits on playlist creation"],
+                    ["⚡", "Auto-Offline Everything", "Songs download automatically as you play"],
+                    ["🎧", "Background Playback", "Music keeps playing when you switch apps"],
+                    ["🔄", "Cross-Device Sync", "Your playlists on every device with a sync code"],
+                    ["📊", "Listening Stats", "See your most played tracks"],
+                    ["🎵", "Priority Song Search", "Faster YouTube matching & better results"],
+                  ].map(([icon, name, desc]) => (
+                    <div key={name} className="pro-feat">
+                      <div className="pro-feat-icon">{icon}</div>
+                      <div className="pro-feat-text">
+                        <div className="pro-feat-name">{name}</div>
+                        <div className="pro-feat-desc">{desc}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="pro-divider" />
+                <div className="pro-pricing">
+                  <div className="pro-price">$9.99 <span>one-time</span></div>
+                  <div className="pro-one-time">✓ Lifetime access — no subscription</div>
+                </div>
+                <div className="pro-actions">
+                  <div ref={paypalContainerRef} className="paypal-container" />
+                  <button className="pro-skip" onClick={() => setShowPro(false)}>Maybe later</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
