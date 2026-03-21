@@ -405,12 +405,17 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: "claude-3-5-sonnet-20241022",
           max_tokens: 1000,
           system: `You are a music playlist curator AI. When the user describes a mood, genre, activity, or vibe, respond with:\n1. A brief, enthusiastic 1-2 sentence intro about the vibe\n2. Exactly 8 song suggestions in this JSON block:\n\n\`\`\`json\n[\n  {"title": "Song Title", "artist": "Artist Name", "genre": "Genre", "duration": "3:42"},\n  ...\n]\n\`\`\`\n\nKeep durations realistic (between 2:30 and 6:00). Genres should be short (e.g. "Hip-Hop", "Indie Rock", "Lo-Fi", "Electronic"). Mix well-known and lesser-known artists. After the JSON, add one sentence about what makes this selection special. Return ONLY this format.`,
           messages: [{ role: "user", content: userText }]
         })
       });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error?.message || `API error ${response.status}`);
+      }
 
       const data = await response.json();
       const fullText = data.content.map(b => b.text || "").join("");
@@ -427,10 +432,10 @@ export default function App() {
       }
 
       setMessages(prev => [...prev, { role: "ai", text: displayText, tracks }]);
-    } catch {
+    } catch (err) {
       setMessages(prev => [...prev, {
         role: "ai",
-        text: "Hmm, couldn't connect right now. Try again in a moment!",
+        text: `Couldn't connect right now: ${err.message}. Try again in a moment!`,
         tracks: null
       }]);
     }
