@@ -1,186 +1,347 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
+// ── IndexedDB helpers ──────────────────────────────────────────────
+const DB_NAME = 'playlist-ai-offline';
+const STORE = 'tracks';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath: 'videoId' });
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+async function dbSave(record) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(record);
+    tx.oncomplete = () => res();
+    tx.onerror = e => rej(e.target.error);
+  });
+}
+async function dbGet(videoId) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(videoId);
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = e => rej(e.target.error);
+  });
+}
+async function dbDelete(videoId) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(videoId);
+    tx.oncomplete = () => res();
+    tx.onerror = e => rej(e.target.error);
+  });
+}
+async function dbKeys() {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAllKeys();
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = e => rej(e.target.error);
+  });
+}
+
+// ── Parse AI response into song list ──────────────────────────────
+function parseSongs(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  const songs = [];
+  for (const line of lines) {
+    const m =
+      line.match(/^\d*[\.\)]\s*(.+?)\s*[-–—]\s*(.+)$/) ||
+      line.match(/^\d*[\.\)]\s*(.+?)\s+by\s+(.+)$/i);
+    if (m) songs.push({ title: m[1].trim(), artist: m[2].trim(), videoId: null });
+  }
+  return songs.slice(0, 15);
+}
+
+// ── Main App ───────────────────────────────────────────────────────
 export default function App() {
   const [prompt, setPrompt] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [playlist, setPlaylist] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(null);
-  const [videoId, setVideoId] = useState(null);
-  const [videoLoading, setVideoLoading] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
+  const [currentIdx, setCurrentIdx] = useState(null);
+  const [playing, setPlaying] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
-  const inputRef = useRef(null);
+  const [offlineIds, setOfflineIds] = useState(new Set());
+  const [downloading, setDownloading] = useState(new Set());
 
-  // When current track changes, fetch its YouTube video ID
+  const audioRef = useRef(null);
+  const blobUrls = useRef({});
+
+  // Load saved offline IDs from IndexedDB on mount
   useEffect(() => {
-    if (currentIndex === null || !playlist[currentIndex]) {
-      setVideoId(null);
-      return;
-    }
-    const song = playlist[currentIndex];
-    setVideoId(null);
-    setVideoLoading(true);
-    setError('');
+    dbKeys().then(ids => setOfflineIds(new Set(ids))).catch(() => {});
+  }, []);
 
-    fetch('/api/youtube-search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: `${song.title} ${song.artist} official audio` }),
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) throw new Error(data.error);
-        setVideoId(data.videoId);
-        setVideoLoading(false);
-      })
-      .catch(err => {
-        setError(`Couldn't find video: ${err.message}`);
-        setVideoLoading(false);
-      });
-  }, [currentIndex, playlist]);
-
-  const generateSuggestions = async () => {
-    if (!prompt.trim()) return;
-    setAiLoading(true);
+  // ── Generate playlist ────────────────────────────────────────────
+  async function generate() {
+    if (!prompt.trim() || isGenerating) return;
+    setIsGenerating(true);
     setError('');
     setSuggestions([]);
-
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: prompt }),
+        body: JSON.stringify({ prompt }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-
-      const jsonMatch = data.reply.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) throw new Error('AI returned unexpected format. Please try again.');
-      const songs = JSON.parse(jsonMatch[0]);
+      const text = data.content || data.message || data.reply || '';
+      const songs = parseSongs(text);
+      if (!songs.length) throw new Error('No songs in response — try a different prompt.');
       setSuggestions(songs);
-    } catch (err) {
-      setError(err.message);
+    } catch (e) {
+      setError(e.message);
     } finally {
-      setAiLoading(false);
+      setIsGenerating(false);
     }
-  };
+  }
 
-  const addToPlaylist = (song) => {
-    if (playlist.find(s => s.title === song.title && s.artist === song.artist)) return;
-    setPlaylist(prev => [...prev, song]);
-  };
+  // ── Add song to playlist (auto-fetch video ID) ───────────────────
+  async function addToPlaylist(song) {
+    const key = `${song.title}__${song.artist}`;
+    if (playlist.some(t => `${t.title}__${t.artist}` === key)) return;
+    setPlaylist(prev => [...prev, { ...song, loading: true }]);
+    try {
+      const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(`${song.title} ${song.artist}`)}`);
+      const data = await res.json();
+      setPlaylist(prev =>
+        prev.map(t =>
+          `${t.title}__${t.artist}` === key
+            ? { ...t, videoId: data.videoId || null, loading: false }
+            : t
+        )
+      );
+    } catch {
+      setPlaylist(prev =>
+        prev.map(t => `${t.title}__${t.artist}` === key ? { ...t, loading: false } : t)
+      );
+    }
+  }
 
-  const removeFromPlaylist = (index) => {
-    setPlaylist(prev => {
-      const next = prev.filter((_, i) => i !== index);
-      if (currentIndex === index) setCurrentIndex(null);
-      else if (currentIndex > index) setCurrentIndex(c => c - 1);
-      return next;
-    });
-  };
+  // ── Select & play track ──────────────────────────────────────────
+  async function selectTrack(idx) {
+    setCurrentIdx(idx);
+    const track = playlist[idx];
+    if (!track || track.loading || !track.videoId) return;
 
-  const playSong = (index) => setCurrentIndex(index);
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
 
-  const playNext = () => {
+    try {
+      // Try offline first
+      const stored = await dbGet(track.videoId);
+      if (stored?.blob) {
+        if (blobUrls.current[track.videoId]) URL.revokeObjectURL(blobUrls.current[track.videoId]);
+        const url = URL.createObjectURL(stored.blob);
+        blobUrls.current[track.videoId] = url;
+        audio.src = url;
+        setPlaying(true);
+        await audio.play();
+        return;
+      }
+      // Stream online
+      const res = await fetch(`/api/youtube-audio?videoId=${track.videoId}`);
+      const data = await res.json();
+      if (!data.url) throw new Error('No stream URL returned');
+      audio.src = data.url;
+      setPlaying(true);
+      await audio.play();
+    } catch (e) {
+      setError(`Playback error: ${e.message}`);
+      setPlaying(false);
+    }
+  }
+
+  function togglePlay() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) { audio.play(); setPlaying(true); }
+    else { audio.pause(); setPlaying(false); }
+  }
+
+  function playNext() {
     if (!playlist.length) return;
-    setCurrentIndex(prev => prev === null ? 0 : (prev + 1) % playlist.length);
-  };
-
-  const playPrev = () => {
+    selectTrack(currentIdx === null ? 0 : (currentIdx + 1) % playlist.length);
+  }
+  function playPrev() {
     if (!playlist.length) return;
-    setCurrentIndex(prev => prev === null ? 0 : (prev - 1 + playlist.length) % playlist.length);
-  };
+    selectTrack(currentIdx === null ? 0 : (currentIdx - 1 + playlist.length) % playlist.length);
+  }
 
-  const isInPlaylist = (song) => playlist.some(s => s.title === song.title && s.artist === song.artist);
-  const currentSong = currentIndex !== null ? playlist[currentIndex] : null;
+  // ── Download for offline ─────────────────────────────────────────
+  async function downloadOffline(e, track) {
+    e.stopPropagation();
+    if (!track.videoId || downloading.has(track.videoId)) return;
+    setDownloading(prev => new Set([...prev, track.videoId]));
+    try {
+      const res = await fetch(`/api/download-audio?videoId=${track.videoId}`);
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const blob = await res.blob();
+      await dbSave({ videoId: track.videoId, blob, title: track.title, artist: track.artist });
+      setOfflineIds(prev => new Set([...prev, track.videoId]));
+    } catch (e) {
+      setError(`Download failed: ${e.message}`);
+    } finally {
+      setDownloading(prev => { const s = new Set(prev); s.delete(track.videoId); return s; });
+    }
+  }
+
+  async function removeOffline(e, videoId) {
+    e.stopPropagation();
+    await dbDelete(videoId);
+    if (blobUrls.current[videoId]) {
+      URL.revokeObjectURL(blobUrls.current[videoId]);
+      delete blobUrls.current[videoId];
+    }
+    setOfflineIds(prev => { const s = new Set(prev); s.delete(videoId); return s; });
+  }
+
+  function removeFromPlaylist(e, idx) {
+    e.stopPropagation();
+    setPlaylist(prev => { const n = [...prev]; n.splice(idx, 1); return n; });
+    if (currentIdx === idx) {
+      audioRef.current?.pause();
+      setCurrentIdx(null);
+      setPlaying(false);
+    } else if (currentIdx > idx) {
+      setCurrentIdx(c => c - 1);
+    }
+  }
+
+  const currentTrack = currentIdx !== null ? playlist[currentIdx] : null;
+  const inPlaylist = new Set(playlist.map(t => `${t.title}__${t.artist}`));
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>🎵 Playlist AI</h1>
-        <p>Describe your vibe — AI picks the songs, you build the playlist</p>
-      </header>
+      <audio
+        ref={audioRef}
+        onEnded={playNext}
+        onPause={() => setPlaying(false)}
+        onPlay={() => setPlaying(true)}
+        onError={playNext}
+      />
 
-      {/* Search */}
+      <div className="header">
+        <h1>🎵 Playlist AI</h1>
+        <p>Describe your vibe — AI curates the songs, you own the playlist</p>
+      </div>
+
       <div className="search-bar">
         <input
-          ref={inputRef}
-          type="text"
-          placeholder="e.g. late night chill vibes, 2000s R&B, gym hype songs..."
           value={prompt}
           onChange={e => setPrompt(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && generateSuggestions()}
+          onKeyDown={e => e.key === 'Enter' && generate()}
+          placeholder="e.g. chill lo-fi beats for late nights, 90s R&B classics..."
+          disabled={isGenerating}
         />
-        <button onClick={generateSuggestions} disabled={aiLoading} className="generate-btn">
-          {aiLoading ? <span className="spinner" /> : '✨ Generate'}
+        <button className="generate-btn" onClick={generate} disabled={isGenerating}>
+          {isGenerating ? <><span className="spinner" /> Thinking…</> : '✨ Generate'}
         </button>
       </div>
 
-      {error && <div className="error-banner">⚠️ {error}</div>}
+      {error && (
+        <div className="error-banner" onClick={() => setError('')}>
+          ⚠️ {error} <span className="dismiss">✕</span>
+        </div>
+      )}
 
       <div className="content">
-        {/* AI Suggestions */}
+        {/* ── Suggestions ── */}
         <div className="suggestions-panel">
           <h2>AI Suggestions {suggestions.length > 0 && <span className="count">{suggestions.length}</span>}</h2>
-          {aiLoading && (
+          {isGenerating ? (
             <div className="loading-grid">
-              {Array(12).fill(0).map((_, i) => <div key={i} className="skeleton-card" />)}
+              {[...Array(8)].map((_, i) => <div key={i} className="skeleton-card" />)}
             </div>
-          )}
-          {!aiLoading && suggestions.length === 0 && (
+          ) : suggestions.length === 0 ? (
             <div className="empty-state">
-              <span>🎶</span>
-              <p>Describe a vibe above and hit Generate</p>
+              <span>🎧</span>
+              <p>Generate a playlist to see suggestions here</p>
+            </div>
+          ) : (
+            <div className="songs-grid">
+              {suggestions.map((song, i) => {
+                const key = `${song.title}__${song.artist}`;
+                const added = inPlaylist.has(key);
+                return (
+                  <div key={i} className={`song-card ${added ? 'in-playlist' : ''}`}>
+                    <div className="song-details">
+                      <div className="song-title">{song.title}</div>
+                      <div className="song-artist">{song.artist}</div>
+                    </div>
+                    <button
+                      className={`add-btn ${added ? 'added' : ''}`}
+                      onClick={() => !added && addToPlaylist(song)}
+                    >
+                      {added ? '✓' : '+'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
-          <div className="songs-grid">
-            {suggestions.map((song, i) => (
-              <div key={i} className={`song-card ${isInPlaylist(song) ? 'in-playlist' : ''}`}>
-                <div className="song-details">
-                  <span className="song-title">{song.title}</span>
-                  <span className="song-artist">{song.artist}</span>
-                </div>
-                <button
-                  className={`add-btn ${isInPlaylist(song) ? 'added' : ''}`}
-                  onClick={() => addToPlaylist(song)}
-                  title={isInPlaylist(song) ? 'Already in playlist' : 'Add to playlist'}
-                >
-                  {isInPlaylist(song) ? '✓' : '+'}
-                </button>
-              </div>
-            ))}
-          </div>
         </div>
 
-        {/* My Playlist */}
+        {/* ── Playlist ── */}
         <div className="playlist-panel">
-          <h2>My Playlist {playlist.length > 0 && <span className="count">{playlist.length}</span>}</h2>
+          <h2>
+            My Playlist
+            {playlist.length > 0 && <span className="count">{playlist.length}</span>}
+            {offlineIds.size > 0 && <span className="offline-count">💾 {offlineIds.size} offline</span>}
+          </h2>
           {playlist.length === 0 ? (
             <div className="empty-state">
               <span>📋</span>
-              <p>Add songs from the suggestions</p>
+              <p>Add songs from suggestions</p>
             </div>
           ) : (
             <div className="track-list">
-              {playlist.map((song, i) => (
+              {playlist.map((track, i) => (
                 <div
                   key={i}
-                  className={`track ${currentIndex === i ? 'active' : ''}`}
-                  onClick={() => playSong(i)}
+                  className={`track ${currentIdx === i ? 'active' : ''}`}
+                  onClick={() => selectTrack(i)}
                 >
-                  <span className="track-num">
-                    {currentIndex === i ? '▶' : i + 1}
-                  </span>
-                  <div className="track-details">
-                    <span className="track-title">{song.title}</span>
-                    <span className="track-artist">{song.artist}</span>
+                  <div className="track-num">
+                    {track.loading
+                      ? <span className="spinner" style={{ width: 12, height: 12 }} />
+                      : currentIdx === i && playing ? '▶' : i + 1}
                   </div>
-                  <button
-                    className="remove-btn"
-                    onClick={e => { e.stopPropagation(); removeFromPlaylist(i); }}
-                    title="Remove"
-                  >✕</button>
+                  <div className="track-details">
+                    <div className="track-title">{track.title}</div>
+                    <div className="track-artist">{track.artist}</div>
+                  </div>
+                  {track.videoId && !track.loading && (
+                    offlineIds.has(track.videoId) ? (
+                      <button
+                        className="offline-badge"
+                        onClick={e => removeOffline(e, track.videoId)}
+                        title="Saved offline — click to remove"
+                      >💾</button>
+                    ) : downloading.has(track.videoId) ? (
+                      <span className="spinner" style={{ width: 14, height: 14, flexShrink: 0 }} />
+                    ) : (
+                      <button
+                        className="download-btn"
+                        onClick={e => downloadOffline(e, track)}
+                        title="Save for offline"
+                      >⬇️</button>
+                    )
+                  )}
+                  <button className="remove-btn" onClick={e => removeFromPlaylist(e, i)}>✕</button>
                 </div>
               ))}
             </div>
@@ -188,36 +349,23 @@ export default function App() {
         </div>
       </div>
 
-      {/* Player */}
-      {currentSong && (
+      {/* ── Player bar ── */}
+      {currentTrack && (
         <div className="player">
           <div className="player-meta">
-            <div className="now-playing-label">Now Playing</div>
-            <div className="now-playing-title">{currentSong.title}</div>
-            <div className="now-playing-artist">{currentSong.artist}</div>
+            <div className="now-playing-label">
+              NOW PLAYING
+              {currentTrack.videoId && offlineIds.has(currentTrack.videoId) && ' · 💾 OFFLINE'}
+            </div>
+            <div className="now-playing-title">{currentTrack.title}</div>
+            <div className="now-playing-artist">{currentTrack.artist}</div>
           </div>
-
           <div className="player-controls">
-            <button onClick={playPrev} className="ctrl-btn" title="Previous">⏮</button>
-            <button onClick={playNext} className="ctrl-btn" title="Next">⏭</button>
-          </div>
-
-          <div className="video-container">
-            {videoLoading && (
-              <div className="video-loading">
-                <div className="spinner large" />
-                <p>Finding on YouTube...</p>
-              </div>
-            )}
-            {videoId && !videoLoading && (
-              <iframe
-                key={videoId}
-                src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
-                allow="autoplay; encrypted-media; fullscreen"
-                allowFullScreen
-                title={`${currentSong.title} - ${currentSong.artist}`}
-              />
-            )}
+            <button className="ctrl-btn" onClick={playPrev} title="Previous">⏮</button>
+            <button className="ctrl-btn play-pause" onClick={togglePlay}>
+              {playing ? '⏸' : '▶'}
+            </button>
+            <button className="ctrl-btn" onClick={playNext} title="Next">⏭</button>
           </div>
         </div>
       )}
