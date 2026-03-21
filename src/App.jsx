@@ -157,10 +157,8 @@ export default function App() {
         await audio.play();
         return;
       }
-      const res = await fetch(`/api/youtube-audio?videoId=${track.videoId}`);
-      const data = await res.json();
-      if (!data.url) throw new Error('No stream URL returned');
-      audio.src = data.url;
+      // Use the server-side proxy so CORS doesn't block playback
+      audio.src = `/api/stream-audio?videoId=${track.videoId}`;
       setPlaying(true);
       await audio.play();
     } catch (e) {
