@@ -367,6 +367,19 @@ body {
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
 
+/* ── Spotify status ── */
+.spotify-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #888;
+  margin-bottom: 10px;
+  padding: 0 2px;
+}
+.spotify-status.done { color: #6ee7b7; }
+.spotify-status.failed { color: #f87171; }
+
 /* ── Manual search ── */
 .manual-search-toggle {
   display: flex;

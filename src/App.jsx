@@ -61,11 +61,22 @@ function parseSongs(text) {
   const songs = [];
   for (const line of lines) {
     const m =
-      line.match(/^\d*[\.)] *(.+?) *[-–—] *(.+)$/) ||
-      line.match(/^\d*[\.)] *(.+?) +by +(.+)$/i);
+      line.match(/^\d*[.)]\s*(.+?)\s*[-–—]\s*(.+)$/) ||
+      line.match(/^\d*[.)]\s*(.+?)\s+by\s+(.+)$/i);
     if (m) songs.push({ title: m[1].trim(), artist: m[2].trim(), videoId: null });
   }
   return songs.slice(0, 50);
+}
+
+// ── Batch helper ───────────────────────────────────────────────────
+async function batchRun(items, fn, batchSize = 5) {
+  const results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const settled = await Promise.allSettled(batch.map(fn));
+    settled.forEach((r, j) => results.push(r.status === 'fulfilled' ? r.value : items[i + j]));
+  }
+  return results;
 }
 
 // ── Main App ───────────────────────────────────────────────────────
@@ -86,6 +97,7 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [spotifyStatus, setSpotifyStatus] = useState(''); // 'loading' | 'done' | 'failed' | ''
 
   const audioRef = useRef(null);
   const blobUrls = useRef({});
@@ -95,30 +107,28 @@ export default function App() {
     dbKeys().then(ids => setOfflineIds(new Set(ids))).catch(() => {});
   }, []);
 
-  // ── Spotify enrichment ───────────────────────────────────────────
+  // ── Spotify enrichment (batched to avoid rate limits) ────────────
   async function enrichWithSpotify(songs) {
-    const results = await Promise.allSettled(
-      songs.map(async song => {
-        try {
-          const res = await fetch(
-            `/api/spotify?q=${encodeURIComponent(`${song.title} ${song.artist}`)}`
-          );
-          if (!res.ok) return song;
-          const data = await res.json();
-          return {
-            ...song,
-            albumArt: data.albumArt || null,
-            previewUrl: data.previewUrl || null,
-            spotifyUrl: data.spotifyUrl || null,
-            albumName: data.albumName || null,
-            spotifyId: data.spotifyId || null,
-          };
-        } catch {
-          return song;
-        }
-      })
-    );
-    return results.map((r, i) => (r.status === 'fulfilled' ? r.value : songs[i]));
+    return batchRun(songs, async song => {
+      try {
+        const res = await fetch(
+          `/api/spotify?q=${encodeURIComponent(`${song.title} ${song.artist}`)}`
+        );
+        if (!res.ok) return song;
+        const data = await res.json();
+        if (data.error) return song;
+        return {
+          ...song,
+          albumArt: data.albumArt || null,
+          previewUrl: data.previewUrl || null,
+          spotifyUrl: data.spotifyUrl || null,
+          albumName: data.albumName || null,
+          spotifyId: data.spotifyId || null,
+        };
+      } catch {
+        return song;
+      }
+    }, 5);
   }
 
   // ── Manual song search ───────────────────────────────────────────
@@ -127,47 +137,29 @@ export default function App() {
     setIsSearching(true);
     setSearchResults([]);
     try {
-      // Search Spotify for up to 10 results
       const res = await fetch(
         `/api/spotify?q=${encodeURIComponent(searchQuery)}&limit=10&type=search`
       );
       if (res.ok) {
         const data = await res.json();
-        // If it returns a single track (old endpoint), wrap it
-        if (data.spotifyId) {
-          const title = searchQuery.split(' - ')[0] || searchQuery;
-          const artist = searchQuery.split(' - ')[1] || '';
-          setSearchResults([{
-            title,
-            artist,
-            albumArt: data.albumArt,
-            previewUrl: data.previewUrl,
-            spotifyUrl: data.spotifyUrl,
-            spotifyId: data.spotifyId,
-            videoId: null,
-          }]);
-        } else if (data.tracks?.length) {
+        if (data.tracks?.length) {
           setSearchResults(data.tracks.map(t => ({ ...t, videoId: null })));
-        } else {
-          setSearchResults([]);
+          return;
         }
       }
-
-      // Also search YouTube/Piped to add a result if Spotify comes back empty
-      if (searchResults.length === 0) {
-        const ytRes = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchQuery)}`);
-        if (ytRes.ok) {
-          const ytData = await ytRes.json();
-          if (ytData.videoId) {
-            const parts = searchQuery.split(' - ');
-            setSearchResults([{
-              title: parts[0]?.trim() || searchQuery,
-              artist: parts[1]?.trim() || '',
-              videoId: ytData.videoId,
-              albumArt: null,
-              previewUrl: null,
-            }]);
-          }
+      // Fallback: YouTube search
+      const ytRes = await fetch(`/api/youtube-search?q=${encodeURIComponent(searchQuery)}`);
+      if (ytRes.ok) {
+        const ytData = await ytRes.json();
+        if (ytData.videoId) {
+          const parts = searchQuery.split(' - ');
+          setSearchResults([{
+            title: parts[0]?.trim() || searchQuery,
+            artist: parts[1]?.trim() || '',
+            videoId: ytData.videoId,
+            albumArt: null,
+            previewUrl: null,
+          }]);
         }
       }
     } catch (e) {
@@ -183,6 +175,7 @@ export default function App() {
     setIsGenerating(true);
     setError('');
     setSuggestions([]);
+    setSpotifyStatus('');
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -195,8 +188,12 @@ export default function App() {
       const songs = parseSongs(text);
       if (!songs.length) throw new Error('No songs in response — try a different prompt.');
       setSuggestions(songs);
+      setIsGenerating(false);
 
-      enrichWithSpotify(songs).then(async enriched => {
+      // Enrich with Spotify in batches
+      setSpotifyStatus('loading');
+      try {
+        const enriched = await enrichWithSpotify(songs);
         setSuggestions(enriched);
 
         const seeds = enriched
@@ -222,10 +219,12 @@ export default function App() {
             }
           } catch {}
         }
-      });
+        setSpotifyStatus('done');
+      } catch {
+        setSpotifyStatus('failed');
+      }
     } catch (e) {
       setError(e.message);
-    } finally {
       setIsGenerating(false);
     }
   }
@@ -236,20 +235,22 @@ export default function App() {
     const key = `${song.title}__${song.artist}`;
 
     let alreadyAdded = false;
+    let hasVideoId = false;
+
     setPlaylist(prev => {
       if (prev.some(t => `${t.title}__${t.artist}` === key)) {
         alreadyAdded = true;
         return prev;
       }
-      // If song already has a videoId (from manual search), skip the lookup
       if (song.videoId) {
+        hasVideoId = true;
         return [...prev, { ...song, loading: false }];
       }
       return [...prev, { ...song, videoId: null, loading: true }];
     });
 
     await new Promise(r => setTimeout(r, 0));
-    if (alreadyAdded || song.videoId) return;
+    if (alreadyAdded || hasVideoId) return;
 
     try {
       const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(`${song.title} ${song.artist}`)}`);
@@ -441,17 +442,31 @@ export default function App() {
         </button>
       </div>
 
+      {/* ── Spotify enrichment status ── */}
+      {spotifyStatus === 'loading' && (
+        <div className="spotify-status">
+          <span className="spinner" style={{ width: 14, height: 14 }} />
+          Adding album art &amp; Spotify recommendations…
+        </div>
+      )}
+      {spotifyStatus === 'done' && suggestions.some(s => s.albumArt) && (
+        <div className="spotify-status done">✓ Spotify enrichment complete — {suggestions.length} songs</div>
+      )}
+      {spotifyStatus === 'failed' && (
+        <div className="spotify-status failed">⚠ Spotify unavailable — showing AI suggestions only</div>
+      )}
+
       {/* ── Manual search toggle ── */}
       <div className="manual-search-toggle">
         <button
           className="toggle-search-btn"
           onClick={() => { setShowSearch(s => !s); setSearchResults([]); setSearchQuery(''); }}
         >
-          {showSearch ? '✕ Close Search' : '🔍 Add any song manually'}
+          {showSearch ? '✕ Close search' : '🔍 Add any song manually'}
         </button>
       </div>
 
-      {/* ── Manual search bar ── */}
+      {/* ── Manual search panel ── */}
       {showSearch && (
         <div className="manual-search-panel">
           <div className="search-bar">
@@ -459,7 +474,7 @@ export default function App() {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && searchSongs()}
-              placeholder="Search any song or artist (e.g. Kendrick Lamar, Hotel California...)"
+              placeholder="Search any song or artist (e.g. Hotel California, Kendrick Lamar...)"
               autoFocus
             />
             <button className="generate-btn" onClick={searchSongs} disabled={isSearching}>
