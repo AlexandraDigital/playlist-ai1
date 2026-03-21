@@ -333,6 +333,40 @@ body {
   flex-shrink: 0;
 }
 
+/* ── Album art ── */
+.song-art, .song-art-placeholder {
+  width: 48px; height: 48px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  object-fit: cover;
+  background: #1e1e28;
+}
+.song-art-placeholder {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.2rem; color: #444;
+}
+
+.track-art {
+  width: 38px; height: 38px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.track-playing-indicator {
+  width: 20px; text-align: center;
+  font-size: 0.7rem; color: #a78bfa;
+  flex-shrink: 0;
+}
+
+.player-art {
+  width: 54px; height: 54px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
 /* ── Spinner ── */
 .spinner {
   width: 18px; height: 18px;

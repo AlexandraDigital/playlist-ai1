@@ -79,15 +79,40 @@ export default function App() {
   const [error, setError] = useState('');
   const [offlineIds, setOfflineIds] = useState(new Set());
   const [downloading, setDownloading] = useState(new Set());
-  // { [videoId]: { received: number, total: number | null } }
   const [dlProgress, setDlProgress] = useState({});
 
   const audioRef = useRef(null);
   const blobUrls = useRef({});
+  const previewUrlRef = useRef(null); // Spotify preview fallback
 
   useEffect(() => {
     dbKeys().then(ids => setOfflineIds(new Set(ids))).catch(() => {});
   }, []);
+
+  // ── Spotify enrichment ───────────────────────────────────────────
+  async function enrichWithSpotify(songs) {
+    const results = await Promise.allSettled(
+      songs.map(async song => {
+        try {
+          const res = await fetch(
+            `/api/spotify?q=${encodeURIComponent(`${song.title} ${song.artist}`)}`
+          );
+          if (!res.ok) return song;
+          const data = await res.json();
+          return {
+            ...song,
+            albumArt: data.albumArt || null,
+            previewUrl: data.previewUrl || null,
+            spotifyUrl: data.spotifyUrl || null,
+            albumName: data.albumName || null,
+          };
+        } catch {
+          return song;
+        }
+      })
+    );
+    return results.map((r, i) => (r.status === 'fulfilled' ? r.value : songs[i]));
+  }
 
   // ── Generate playlist ────────────────────────────────────────────
   async function generate() {
@@ -106,7 +131,9 @@ export default function App() {
       const text = data.content || data.message || data.reply || '';
       const songs = parseSongs(text);
       if (!songs.length) throw new Error('No songs in response — try a different prompt.');
-      setSuggestions(songs);
+      setSuggestions(songs); // show immediately
+      // enrich with Spotify album art in background
+      enrichWithSpotify(songs).then(enriched => setSuggestions(enriched));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -118,6 +145,7 @@ export default function App() {
   async function addToPlaylist(song) {
     const key = `${song.title}__${song.artist}`;
     if (playlist.some(t => `${t.title}__${t.artist}` === key)) return;
+    // spread song so albumArt/previewUrl/spotifyUrl come along
     setPlaylist(prev => [...prev, { ...song, loading: true }]);
     try {
       const res = await fetch(`/api/youtube-search?q=${encodeURIComponent(`${song.title} ${song.artist}`)}`);
@@ -140,29 +168,45 @@ export default function App() {
   async function selectTrack(idx) {
     setCurrentIdx(idx);
     const track = playlist[idx];
-    if (!track || track.loading || !track.videoId) return;
+    if (!track || track.loading) return;
 
     const audio = audioRef.current;
     if (!audio) return;
     audio.pause();
 
+    // Store preview URL for fallback in onError
+    previewUrlRef.current = track.previewUrl || null;
+
     try {
-      const stored = await dbGet(track.videoId);
-      if (stored?.blob) {
-        if (blobUrls.current[track.videoId]) URL.revokeObjectURL(blobUrls.current[track.videoId]);
-        const url = URL.createObjectURL(stored.blob);
-        blobUrls.current[track.videoId] = url;
-        audio.src = url;
+      // Try offline blob first
+      if (track.videoId) {
+        const stored = await dbGet(track.videoId);
+        if (stored?.blob) {
+          if (blobUrls.current[track.videoId]) URL.revokeObjectURL(blobUrls.current[track.videoId]);
+          const url = URL.createObjectURL(stored.blob);
+          blobUrls.current[track.videoId] = url;
+          audio.src = url;
+          audio.load();
+          setPlaying(true);
+          await audio.play();
+          return;
+        }
+        // Stream via proxy
+        audio.src = `/api/stream-audio?videoId=${track.videoId}`;
         audio.load();
         setPlaying(true);
         await audio.play();
         return;
       }
-      // Use the server-side proxy so CORS doesn't block playback
-      audio.src = `/api/stream-audio?videoId=${track.videoId}`;
-      audio.load();
-      setPlaying(true);
-      await audio.play();
+
+      // No videoId yet — try Spotify preview
+      if (track.previewUrl) {
+        audio.src = track.previewUrl;
+        previewUrlRef.current = null; // don't double-fallback
+        audio.load();
+        setPlaying(true);
+        await audio.play();
+      }
     } catch (e) {
       setError(`Playback error: ${e.message}`);
       setPlaying(false);
@@ -216,7 +260,13 @@ export default function App() {
       }
 
       const blob = new Blob(chunks);
-      await dbSave({ videoId: track.videoId, blob, title: track.title, artist: track.artist });
+      await dbSave({
+        videoId: track.videoId,
+        blob,
+        title: track.title,
+        artist: track.artist,
+        albumArt: track.albumArt || null,
+      });
       setOfflineIds(prev => new Set([...prev, track.videoId]));
     } catch (err) {
       setError(`Download failed: ${err.message}`);
@@ -259,6 +309,16 @@ export default function App() {
         onPause={() => setPlaying(false)}
         onPlay={() => setPlaying(true)}
         onError={e => {
+          const preview = previewUrlRef.current;
+          if (preview) {
+            // Fallback to Spotify 30-sec preview
+            previewUrlRef.current = null;
+            const audio = audioRef.current;
+            audio.src = preview;
+            audio.load();
+            audio.play().catch(() => setPlaying(false));
+            return;
+          }
           const err = e.target.error;
           setError(`Audio error: ${err ? err.message : 'failed to load stream'}`);
           setPlaying(false);
@@ -309,6 +369,10 @@ export default function App() {
                 const added = inPlaylist.has(key);
                 return (
                   <div key={i} className={`song-card ${added ? 'in-playlist' : ''}`}>
+                    {song.albumArt
+                      ? <img className="song-art" src={song.albumArt} alt="" loading="lazy" />
+                      : <div className="song-art-placeholder">🎵</div>
+                    }
                     <div className="song-details">
                       <div className="song-title">{song.title}</div>
                       <div className="song-artist">{song.artist}</div>
@@ -353,15 +417,17 @@ export default function App() {
                     className={`track ${currentIdx === i ? 'active' : ''}`}
                     onClick={() => selectTrack(i)}
                   >
-                    <div className="track-num">
-                      {track.loading
-                        ? <span className="spinner" style={{ width: 12, height: 12 }} />
-                        : currentIdx === i && playing ? '▶' : i + 1}
-                    </div>
+                    {track.albumArt
+                      ? <img className="track-art" src={track.albumArt} alt="" loading="lazy" />
+                      : <div className="track-num">
+                          {track.loading
+                            ? <span className="spinner" style={{ width: 12, height: 12 }} />
+                            : currentIdx === i && playing ? '▶' : i + 1}
+                        </div>
+                    }
                     <div className="track-details">
                       <div className="track-title">{track.title}</div>
                       <div className="track-artist">{track.artist}</div>
-                      {/* Download progress bar */}
                       {isDownloading && (
                         <div className="dl-progress-wrap">
                           <div
@@ -378,6 +444,13 @@ export default function App() {
                         </div>
                       )}
                     </div>
+                    {track.albumArt && (
+                      <div className="track-playing-indicator">
+                        {track.loading
+                          ? <span className="spinner" style={{ width: 12, height: 12 }} />
+                          : currentIdx === i && playing ? '▶' : null}
+                      </div>
+                    )}
                     {track.videoId && !track.loading && !isDownloading && (
                       offlineIds.has(track.videoId) ? (
                         <button
@@ -405,10 +478,14 @@ export default function App() {
       {/* ── Player bar ── */}
       {currentTrack && (
         <div className="player">
+          {currentTrack.albumArt && (
+            <img className="player-art" src={currentTrack.albumArt} alt="" />
+          )}
           <div className="player-meta">
             <div className="now-playing-label">
               NOW PLAYING
               {currentTrack.videoId && offlineIds.has(currentTrack.videoId) && ' · 💾 OFFLINE'}
+              {currentTrack.previewUrl && !currentTrack.videoId && ' · 🎵 PREVIEW'}
             </div>
             <div className="now-playing-title">{currentTrack.title}</div>
             <div className="now-playing-artist">{currentTrack.artist}</div>
