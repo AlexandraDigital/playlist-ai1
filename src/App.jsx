@@ -208,6 +208,19 @@ const STYLES = `
   @keyframes bar { from{transform:scaleY(.25)} to{transform:scaleY(1)} }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
+  /* ADD SONG MODAL */
+  .modal-back { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.75); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .modal { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:22px; width:100%; max-width:400px; }
+  .modal-title { font-size:16px; font-weight:600; margin-bottom:16px; }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:11px; font-weight:500; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; margin-bottom:5px; }
+  .field input { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; font-size:14px; color:var(--text); font-family:var(--font); outline:none; transition:border-color .15s; }
+  .field input:focus { border-color:var(--purple); }
+  .field input::placeholder { color:var(--muted); }
+  .modal-btns { display:flex; gap:8px; margin-top:16px; }
+  .modal-btns .btn { flex:1; padding:10px; font-size:13px; }
+
   /* DOWNLOADS TAB */
   .dl-head { display:flex; align-items:center; justify-content:space-between; }
   .dl-title { font-size:17px; font-weight:600; }
@@ -296,6 +309,8 @@ export default function App() {
   const [dlStatus, setDlStatus] = useState({}); // videoId -> 'doing'|'done'|'err'
   const [downloads, setDownloads] = useState([]);
   const [blobUrls, setBlobUrls] = useState({}); // videoId -> blobUrl
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({ title: "", artist: "", genre: "", duration: "" });
 
   const chatEndRef = useRef(null);
   const ytDiv = useRef(null);
@@ -536,6 +551,14 @@ export default function App() {
     setMainInput("");
   };
 
+  const submitAddSong = () => {
+    const { title, artist, genre, duration } = addForm;
+    if (!title.trim() || !artist.trim()) return;
+    addTrack({ title: title.trim(), artist: artist.trim(), genre: genre.trim() || "Unknown", duration: duration.trim() || "?" });
+    setAddForm({ title: "", artist: "", genre: "", duration: "" });
+    setAddOpen(false);
+  };
+
   const exportPlaylist = () => {
     const text = `${plName}\n${"─".repeat(30)}\n\n` +
       playlist.map((t, i) =>
@@ -603,6 +626,41 @@ export default function App() {
     <>
       <style>{STYLES}</style>
       <div className="yt-hidden"><div ref={ytDiv} /></div>
+
+      {/* ADD SONG MODAL */}
+      {addOpen && (
+        <div className="modal-back" onClick={e => { if (e.target.className === "modal-back") setAddOpen(false); }}>
+          <div className="modal">
+            <div className="modal-title">Add a Song</div>
+            <div className="field">
+              <label>Song Title *</label>
+              <input autoFocus placeholder="e.g. Bohemian Rhapsody" value={addForm.title}
+                onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") submitAddSong(); }} />
+            </div>
+            <div className="field">
+              <label>Artist *</label>
+              <input placeholder="e.g. Queen" value={addForm.artist}
+                onChange={e => setAddForm(f => ({ ...f, artist: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") submitAddSong(); }} />
+            </div>
+            <div className="field">
+              <label>Genre (optional)</label>
+              <input placeholder="e.g. Rock" value={addForm.genre}
+                onChange={e => setAddForm(f => ({ ...f, genre: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>Duration (optional)</label>
+              <input placeholder="e.g. 3:45" value={addForm.duration}
+                onChange={e => setAddForm(f => ({ ...f, duration: e.target.value }))} />
+            </div>
+            <div className="modal-btns">
+              <button className="btn btn-g" onClick={() => setAddOpen(false)}>Cancel</button>
+              <button className="btn btn-p" onClick={submitAddSong} disabled={!addForm.title.trim() || !addForm.artist.trim()}>Add to Playlist</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="app">
         {/* HEADER */}
@@ -704,9 +762,10 @@ export default function App() {
                       : "Type a vibe above and hit Generate"}
                   </div>
                 </div>
-                {playlist.length > 0 && (
+                {playlist.length >= 0 && (
                   <div className="pl-actions">
-                    <button className="btn btn-p" onClick={exportPlaylist}>↓ Export</button>
+                    <button className="btn btn-p" onClick={() => setAddOpen(true)}>+ Add Song</button>
+                    {playlist.length > 0 && <button className="btn btn-p" onClick={exportPlaylist}>↓ Export</button>}
                     <button className="btn btn-g" onClick={() => {
                       setPlaylist([]); setNowPlaying(null);
                       audioEl.current.pause(); ytPlayer.current?.stopVideo(); setIsPlaying(false);
