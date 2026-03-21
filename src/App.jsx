@@ -278,14 +278,25 @@ function totalDur(tracks) {
 }
 
 async function ytSearch(title, artist) {
-  try {
-    const q = encodeURIComponent(`${title} ${artist}`);
-    const r = await fetch(`/api/youtube-search?q=${q}`);
-    const d = await r.json();
-    const item = d?.items?.[0];
-    if (!item) return null;
-    return { videoId: item.id?.videoId, thumbnail: item.snippet?.thumbnails?.medium?.url };
-  } catch { return null; }
+  // Try multiple query variations as fallbacks
+  const queries = [
+    `${title} ${artist}`,
+    `${title} ${artist} song`,
+    `${artist} ${title}`,
+    `${title} song`,
+    title,
+  ];
+  for (const q of queries) {
+    try {
+      const r = await fetch(`/api/youtube-search?q=${encodeURIComponent(q)}`);
+      const d = await r.json();
+      const item = d?.items?.[0];
+      if (item?.id?.videoId) {
+        return { videoId: item.id.videoId, thumbnail: item.snippet?.thumbnails?.medium?.url };
+      }
+    } catch {}
+  }
+  return null;
 }
 
 export default function App() {
@@ -677,11 +688,25 @@ export default function App() {
           <div className="track-title">{track.title}</div>
           <div className="track-artist">{track.artist}</div>
           <div className={`track-st ${isOffline ? "offline" : track.ytStatus || ""}`}>
-            {isOffline ? "⚡ offline" : track.ytStatus === "found" ? "● ready" : track.ytStatus === "searching" ? "○ searching…" : track.ytStatus === "notfound" ? "○ not found" : ""}
+            {isOffline ? "⚡ offline" : track.ytStatus === "found" ? "● ready" : track.ytStatus === "searching" ? "○ searching…" : track.ytStatus === "notfound" ? "○ not found — tap ↺ to retry" : ""}
           </div>
         </div>
         {track.genre && <div className="track-genre">{track.genre}</div>}
         <div className="track-dur">{track.duration}</div>
+        {!fromOffline && track.ytStatus === "notfound" && (
+          <button
+            className="track-act"
+            onClick={() => {
+              setPlaylist(p => p.map(t => t.id === track.id ? { ...t, ytStatus: "searching" } : t));
+              ytSearch(track.title, track.artist).then(yt => {
+                setPlaylist(p => p.map(t => t.id === track.id
+                  ? { ...t, videoId: yt?.videoId || null, thumbnail: yt?.thumbnail || null, ytStatus: yt?.videoId ? "found" : "notfound" }
+                  : t));
+              });
+            }}
+            title="Retry YouTube search"
+          >↺</button>
+        )}
         {!fromOffline && track.videoId && (
           <button
             className={`track-act${dl === "done" ? " dl-done" : dl === "doing" ? " dl-doing" : dl === "err" ? " dl-err" : ""}`}
