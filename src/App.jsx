@@ -178,9 +178,9 @@ const STYLES = `
   .thumb-ov { position:absolute; inset:0; background:rgba(0,0,0,.65);
     display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .12s; }
   .track-thumb:hover .thumb-ov, .track-row.playing .thumb-ov { opacity:1; }
-  .play-ic { width:18px; height:18px; border-radius:3px; background:#ff0000;
+  .play-ic { width:18px; height:18px; border-radius:3px; background:var(--purple);
     display:flex; align-items:center; justify-content:center; font-size:8px; color:#fff; }
-  .offline-ic { width:18px; height:18px; border-radius:50%; background:var(--purple);
+  .offline-ic { width:18px; height:18px; border-radius:50%; background:var(--green);
     display:flex; align-items:center; justify-content:center; font-size:8px; color:#fff; }
   .track-info { flex:1; min-width:0; }
   .track-title { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -244,7 +244,8 @@ const STYLES = `
   .player-title { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .player-artist { font-size:11px; color:var(--muted); margin-top:1px; }
   .player-mode { font-size:9px; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
-  .player-mode.yt { color:#555; } .player-mode.offline { color:var(--green); }
+  .player-mode.stream { color:#555; } .player-mode.offline { color:var(--green); }
+  .player-mode.saving { color:var(--purple-light); }
   .ctrls { display:flex; align-items:center; gap:8px; flex-shrink:0; }
   .ctrl { width:32px; height:32px; border-radius:50%; border:1px solid var(--border); background:transparent;
     color:var(--sub); cursor:pointer; display:flex; align-items:center; justify-content:center;
@@ -255,7 +256,6 @@ const STYLES = `
     color:#fff; cursor:pointer; font-size:14px; transition:all .15s;
     display:flex; align-items:center; justify-content:center; }
   .play-btn:hover { background:var(--purple2); transform:scale(1.05); }
-  .yt-hidden { position:fixed; top:-9999px; left:-9999px; width:1px; height:1px; pointer-events:none; }
 `;
 
 const EMOJIS = ["🎵","🎸","🎹","🎷","🎺","🥁","🎻","🎤","🎧","🎼"];
@@ -281,17 +281,6 @@ async function ytSearch(title, artist) {
   } catch { return null; }
 }
 
-let ytLoaded = false, ytReady = false;
-const ytCbs = [];
-function loadYT() {
-  if (ytLoaded) return; ytLoaded = true;
-  const s = document.createElement("script");
-  s.src = "https://www.youtube.com/iframe_api";
-  document.head.appendChild(s);
-  window.onYouTubeIframeAPIReady = () => { ytReady = true; ytCbs.forEach(c => c()); };
-}
-function onYT(cb) { if (ytReady) cb(); else ytCbs.push(cb); }
-
 export default function App() {
   const [tab, setTab] = useState("playlist");
   const [playlist, setPlaylist] = useState([]);
@@ -311,25 +300,25 @@ export default function App() {
   const [blobUrls, setBlobUrls] = useState({}); // videoId -> blobUrl
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({ title: "", artist: "", genre: "", duration: "" });
+  const [autoSaving, setAutoSaving] = useState(false); // shows "auto-saving" in player
 
   const chatEndRef = useRef(null);
-  const ytDiv = useRef(null);
-  const ytPlayer = useRef(null);
   const audioEl = useRef(new Audio());
   const blobUrlsRef = useRef({});
-  const drawerTopRef = useRef(0);
+  const dlStatusRef = useRef({});
+  const headerRef = useRef(null);
+
+  // Keep dlStatusRef in sync
+  useEffect(() => { dlStatusRef.current = dlStatus; }, [dlStatus]);
 
   // Load offline tracks on mount
   useEffect(() => {
     IDB.getAll().then(tracks => {
       if (!tracks.length) return;
       setDownloads(tracks);
-      const urls = {};
-      const status = {};
+      const urls = {}, status = {};
       tracks.forEach(t => {
-        if (t.audioBlob) {
-          urls[t.videoId] = URL.createObjectURL(t.audioBlob);
-        }
+        if (t.audioBlob) urls[t.videoId] = URL.createObjectURL(t.audioBlob);
         status[t.videoId] = "done";
       });
       blobUrlsRef.current = urls;
@@ -338,7 +327,7 @@ export default function App() {
     }).catch(console.error);
   }, []);
 
-  // Cleanup blob URLs
+  // Cleanup blob URLs on unmount
   useEffect(() => () => {
     Object.values(blobUrlsRef.current).forEach(URL.revokeObjectURL);
   }, []);
@@ -348,9 +337,7 @@ export default function App() {
     if (aiOpen) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, loading, aiOpen]);
 
-  useEffect(() => { loadYT(); }, []);
-
-  // Audio events
+  // Audio element events
   useEffect(() => {
     const audio = audioEl.current;
     const onEnd = () => {
@@ -374,71 +361,87 @@ export default function App() {
     };
   }, [downloads, playlist]);
 
-  const initYTPlayer = useCallback((videoId) => {
-    audioEl.current.pause();
-    onYT(() => {
-      if (ytPlayer.current) {
-        ytPlayer.current.loadVideoById(videoId);
-        ytPlayer.current.playVideo();
-        setIsPlaying(true);
-        return;
+  /* ── Core download function (saves blob to IndexedDB) ──────── */
+  const saveTrack = useCallback(async (track, signal) => {
+    const vid = track.videoId;
+    if (!vid) return;
+    if (dlStatusRef.current[vid] === "done" || dlStatusRef.current[vid] === "doing") return;
+    setDlStatus(s => ({ ...s, [vid]: "doing" }));
+    try {
+      const r = await fetch(`/api/download?videoId=${vid}`, signal ? { signal } : {});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const rec = {
+        videoId: vid, title: track.title, artist: track.artist,
+        duration: track.duration, thumbnail: track.thumbnail, genre: track.genre,
+        audioBlob: blob, savedAt: Date.now()
+      };
+      await IDB.save(rec);
+      const blobUrl = URL.createObjectURL(blob);
+      blobUrlsRef.current[vid] = blobUrl;
+      setBlobUrls(u => ({ ...u, [vid]: blobUrl }));
+      setDownloads(prev => [...prev.filter(t => t.videoId !== vid), rec]);
+      setDlStatus(s => ({ ...s, [vid]: "done" }));
+      return blobUrl;
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        console.error("Save failed:", e);
+        setDlStatus(s => ({ ...s, [vid]: "err" }));
       }
-      ytPlayer.current = new window.YT.Player(ytDiv.current, {
-        height: "1", width: "1", videoId,
-        playerVars: { autoplay: 1, controls: 0, rel: 0 },
-        events: {
-          onStateChange: (e) => {
-            const S = window.YT.PlayerState;
-            if (e.data === S.PLAYING) setIsPlaying(true);
-            if (e.data === S.PAUSED) setIsPlaying(false);
-            if (e.data === S.ENDED) {
-              setIsPlaying(false);
-              setNowPlaying(prev => {
-                if (!prev) return prev;
-                const i = playlist.findIndex(t => t.videoId === prev.videoId);
-                const next = playlist[i + 1];
-                if (next?.videoId) {
-                  setTimeout(() => {
-                    setNowPlaying(next);
-                    ytPlayer.current?.loadVideoById(next.videoId);
-                    ytPlayer.current?.playVideo();
-                    setIsPlaying(true);
-                  }, 400);
-                }
-                return prev;
-              });
-            }
-          }
-        }
-      });
-    });
-  }, [playlist]);
+      return null;
+    }
+  }, []);
 
+  /* ── Play a track ───────────────────────────────────────────── */
   const playTrack = useCallback((track, fromOffline = false) => {
     if (!track.videoId) return;
     const blobUrl = blobUrlsRef.current[track.videoId];
     setNowPlaying({ ...track, _offline: fromOffline || !!blobUrl });
 
     if (blobUrl) {
-      ytPlayer.current?.pauseVideo();
+      // Play from local storage
       audioEl.current.src = blobUrl;
-      audioEl.current.play();
-      setIsPlaying(true);
-    } else if (track.videoId) {
-      audioEl.current.pause();
-      initYTPlayer(track.videoId);
+      audioEl.current.play().catch(console.error);
+    } else {
+      // Stream directly through our proxy API
+      audioEl.current.src = `/api/download?videoId=${track.videoId}`;
+      audioEl.current.play().catch(console.error);
     }
-  }, [initYTPlayer]);
+  }, []);
+
+  /* ── Auto-save when a song starts streaming ─────────────────── */
+  useEffect(() => {
+    if (!nowPlaying?.videoId) return;
+    const vid = nowPlaying.videoId;
+    if (blobUrlsRef.current[vid]) return; // already saved
+    if (dlStatusRef.current[vid] === "done" || dlStatusRef.current[vid] === "doing") return;
+
+    setAutoSaving(true);
+    const controller = new AbortController();
+
+    // Slight delay so the streaming request gets priority
+    const timer = setTimeout(async () => {
+      const url = await saveTrack(nowPlaying, controller.signal);
+      setAutoSaving(false);
+      // If the song is still playing and we now have a blob, update nowPlaying flag
+      if (url) {
+        setNowPlaying(prev =>
+          prev?.videoId === vid ? { ...prev, _offline: true } : prev
+        );
+      }
+    }, 3000);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+      setAutoSaving(false);
+    };
+  }, [nowPlaying?.videoId, saveTrack]);
 
   const togglePlay = () => {
     if (!nowPlaying) return;
-    const blobUrl = blobUrlsRef.current[nowPlaying.videoId];
-    if (blobUrl) {
-      if (isPlaying) audioEl.current.pause(); else audioEl.current.play();
-    } else {
-      if (!ytPlayer.current) return;
-      if (isPlaying) ytPlayer.current.pauseVideo(); else ytPlayer.current.playVideo();
-    }
+    if (isPlaying) audioEl.current.pause();
+    else audioEl.current.play().catch(console.error);
   };
 
   const skip = (dir) => {
@@ -457,7 +460,6 @@ export default function App() {
     setPlaylist(p => p.map(t => t.id === id
       ? { ...t, videoId: yt?.videoId || null, thumbnail: yt?.thumbnail || null, ytStatus: yt?.videoId ? "found" : "notfound" }
       : t));
-    // If this track is already downloaded, mark it
     if (yt?.videoId && blobUrlsRef.current[yt.videoId]) {
       setDlStatus(s => ({ ...s, [yt.videoId]: "done" }));
     }
@@ -468,38 +470,15 @@ export default function App() {
   const removeTrack = (id) => {
     setPlaylist(p => p.filter(t => t.id !== id));
     if (nowPlaying?.id === id) {
-      setNowPlaying(null); audioEl.current.pause(); ytPlayer.current?.stopVideo(); setIsPlaying(false);
+      setNowPlaying(null);
+      audioEl.current.pause();
+      setIsPlaying(false);
     }
   };
 
+  // Manual download button (same as saveTrack but triggered by user)
   const downloadTrack = async (track) => {
-    if (!track.videoId || dlStatus[track.videoId] === "doing" || dlStatus[track.videoId] === "done") return;
-    setDlStatus(s => ({ ...s, [track.videoId]: "doing" }));
-    try {
-      const r = await fetch(`/api/download?videoId=${track.videoId}`);
-      const { url, error } = await r.json();
-      if (!url) throw new Error(error || "No download URL");
-
-      const audioRes = await fetch(url);
-      if (!audioRes.ok) throw new Error("Audio fetch failed");
-      const blob = await audioRes.blob();
-
-      const rec = {
-        videoId: track.videoId, title: track.title, artist: track.artist,
-        duration: track.duration, thumbnail: track.thumbnail, genre: track.genre,
-        audioBlob: blob, savedAt: Date.now()
-      };
-      await IDB.save(rec);
-
-      const blobUrl = URL.createObjectURL(blob);
-      blobUrlsRef.current[track.videoId] = blobUrl;
-      setBlobUrls(u => ({ ...u, [track.videoId]: blobUrl }));
-      setDownloads(prev => [...prev.filter(t => t.videoId !== track.videoId), rec]);
-      setDlStatus(s => ({ ...s, [track.videoId]: "done" }));
-    } catch (e) {
-      console.error("Download failed:", e);
-      setDlStatus(s => ({ ...s, [track.videoId]: "err" }));
-    }
+    await saveTrack(track);
   };
 
   const deleteDownload = async (videoId) => {
@@ -512,7 +491,9 @@ export default function App() {
     setDownloads(prev => prev.filter(t => t.videoId !== videoId));
     setDlStatus(s => { const c = { ...s }; delete c[videoId]; return c; });
     if (nowPlaying?.videoId === videoId) {
-      setNowPlaying(null); audioEl.current.pause(); setIsPlaying(false);
+      setNowPlaying(null);
+      audioEl.current.pause();
+      setIsPlaying(false);
     }
   };
 
@@ -570,7 +551,7 @@ export default function App() {
     a.click();
   };
 
-  const isOfflinePlaying = nowPlaying && !!blobUrlsRef.current[nowPlaying.videoId];
+  const isOfflinePlaying = nowPlaying && !!blobUrlsRef.current[nowPlaying?.videoId];
 
   const renderRow = (track, i, fromOffline = false) => {
     const isNowPlaying = nowPlaying?.videoId === track.videoId;
@@ -604,7 +585,7 @@ export default function App() {
           <button
             className={`track-act${dl === "done" ? " dl-done" : dl === "doing" ? " dl-doing" : dl === "err" ? " dl-err" : ""}`}
             onClick={() => downloadTrack(track)}
-            title={dl === "done" ? "Saved offline ✓" : dl === "doing" ? "Downloading…" : "Download for offline"}
+            title={dl === "done" ? "Saved offline ✓" : dl === "doing" ? "Saving…" : "Save offline"}
           >
             {dl === "done" ? "✓" : dl === "doing" ? <span className="spin">↻</span> : "⬇"}
           </button>
@@ -618,14 +599,9 @@ export default function App() {
     );
   };
 
-  // Calculate drawer top position
-  const headerRef = useRef(null);
-  const tabsRef = useRef(null);
-
   return (
     <>
       <style>{STYLES}</style>
-      <div className="yt-hidden"><div ref={ytDiv} /></div>
 
       {/* ADD SONG MODAL */}
       {addOpen && (
@@ -740,7 +716,7 @@ export default function App() {
         </div>
 
         {/* TABS */}
-        <div className="tabs" ref={tabsRef}>
+        <div className="tabs">
           <button className={`tab${tab === "playlist" ? " active" : ""}`} onClick={() => setTab("playlist")}>
             Playlist {playlist.length > 0 && <span className="tab-badge">{playlist.length}</span>}
           </button>
@@ -758,20 +734,18 @@ export default function App() {
                   <input className="pl-name" value={plName} onChange={e => setPlName(e.target.value)} maxLength={40} placeholder="Playlist name…" />
                   <div className="pl-meta">
                     {playlist.length > 0
-                      ? `${playlist.length} tracks · ${totalDur(playlist)} · hover a track and tap ⬇ to save offline`
+                      ? `${playlist.length} tracks · ${totalDur(playlist)} · songs auto-save when played`
                       : "Type a vibe above and hit Generate"}
                   </div>
                 </div>
-                {playlist.length >= 0 && (
-                  <div className="pl-actions">
-                    <button className="btn btn-p" onClick={() => setAddOpen(true)}>+ Add Song</button>
-                    {playlist.length > 0 && <button className="btn btn-p" onClick={exportPlaylist}>↓ Export</button>}
-                    <button className="btn btn-g" onClick={() => {
-                      setPlaylist([]); setNowPlaying(null);
-                      audioEl.current.pause(); ytPlayer.current?.stopVideo(); setIsPlaying(false);
-                    }}>Clear</button>
-                  </div>
-                )}
+                <div className="pl-actions">
+                  <button className="btn btn-p" onClick={() => setAddOpen(true)}>+ Add Song</button>
+                  {playlist.length > 0 && <button className="btn btn-p" onClick={exportPlaylist}>↓ Export</button>}
+                  <button className="btn btn-g" onClick={() => {
+                    setPlaylist([]); setNowPlaying(null);
+                    audioEl.current.pause(); setIsPlaying(false);
+                  }}>Clear</button>
+                </div>
               </div>
               <div className="track-list">
                 {playlist.length === 0 ? (
@@ -793,7 +767,7 @@ export default function App() {
                   <div className="dl-sub">
                     {downloads.length > 0
                       ? `${downloads.length} track${downloads.length !== 1 ? "s" : ""} saved · plays without internet`
-                      : "No offline tracks yet"}
+                      : "No offline tracks yet — play any song to auto-save it"}
                   </div>
                 </div>
                 {downloads.length > 0 && (
@@ -807,7 +781,7 @@ export default function App() {
                   <div className="empty">
                     <div className="empty-icon">⬇</div>
                     <div className="empty-title">No downloads yet</div>
-                    <div className="empty-sub">In your playlist, hover any track<br />and tap ⬇ to save it here for offline listening.</div>
+                    <div className="empty-sub">Play any song and it will automatically<br />save here for offline listening.</div>
                   </div>
                 ) : downloads.map((t, i) => renderRow(t, i, true))}
               </div>
@@ -827,8 +801,8 @@ export default function App() {
               <div className="player-info">
                 <div className="player-title">{nowPlaying.title}</div>
                 <div className="player-artist">{nowPlaying.artist}</div>
-                <div className={`player-mode ${isOfflinePlaying ? "offline" : "yt"}`}>
-                  {isOfflinePlaying ? "⚡ playing offline" : "▶ youtube"}
+                <div className={`player-mode ${isOfflinePlaying ? "offline" : autoSaving ? "saving" : "stream"}`}>
+                  {isOfflinePlaying ? "⚡ offline" : autoSaving ? "↻ saving…" : "▶ streaming"}
                 </div>
               </div>
               <div className="ctrls">
