@@ -705,6 +705,10 @@ export default function App() {
   const playingRef = useRef(playing);
   const isProRef = useRef(isPro);
   const tabRef = useRef(tab);
+  // Refs so lock-screen / background handlers always call the latest version
+  const skipNextRef = useRef(null);
+  const skipPrevRef = useRef(null);
+  const togglePlayRef = useRef(null);
 
   useEffect(() => { playlistRef.current = playlist; }, [playlist]);
   useEffect(() => { currentIdxRef.current = currentIdx; }, [currentIdx]);
@@ -742,11 +746,12 @@ export default function App() {
 
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
-    navigator.mediaSession.setActionHandler("play", () => togglePlay());
-    navigator.mediaSession.setActionHandler("pause", () => togglePlay());
-    navigator.mediaSession.setActionHandler("nexttrack", () => skipNext());
-    navigator.mediaSession.setActionHandler("previoustrack", () => skipPrev());
-  }, []);
+    // Always delegate through refs so handlers stay current after re-renders
+    navigator.mediaSession.setActionHandler("play",          () => togglePlayRef.current?.());
+    navigator.mediaSession.setActionHandler("pause",         () => togglePlayRef.current?.());
+    navigator.mediaSession.setActionHandler("nexttrack",     () => skipNextRef.current?.());
+    navigator.mediaSession.setActionHandler("previoustrack", () => skipPrevRef.current?.());
+  }, []); // refs handle freshness — no deps needed
 
   useEffect(() => {
     IDB.getAll().then((tracks) => {
@@ -860,14 +865,19 @@ export default function App() {
 
       const blobUrl = blobUrlsRef.current[track.videoId];
       if (blobUrl) {
-        const currentTime = ytPlayerRef.current?.getCurrentTime?.() || 0;
+        // Bug fix: prefer currentTime from the audio element when it is already
+      // playing (e.g. second background transition); fall back to YT player.
+      const currentTime = audioRef.current
+          ? audioRef.current.currentTime
+          : (ytPlayerRef.current?.getCurrentTime?.() || 0);
         ytPlayerRef.current?.pauseVideo?.();
         if (audioRef.current) { audioRef.current.pause(); }
         const a = new Audio(blobUrl);
         audioRef.current = a;
         a.currentTime = currentTime;
         a.play().catch(() => {});
-        a.onended = () => skipNext();
+        // Bug fix: use ref so onended always calls the latest skipNext
+        a.onended = () => skipNextRef.current?.();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -966,6 +976,7 @@ export default function App() {
       setPlaying(false); return i;
     });
   }, [offlineTracks, playTrack]);
+  useEffect(() => { skipNextRef.current = skipNext; }, [skipNext]);
 
   const skipPrev = useCallback(() => {
     setCurrentIdx((i) => {
@@ -974,6 +985,7 @@ export default function App() {
       return i;
     });
   }, [playTrack]);
+  useEffect(() => { skipPrevRef.current = skipPrev; }, [skipPrev]);
 
   const togglePlay = useCallback(() => {
     if (currentIdx === null) { playTrack(0); return; }
@@ -985,6 +997,7 @@ export default function App() {
       playing ? ytPlayerRef.current.pauseVideo() : ytPlayerRef.current.playVideo();
     }
   }, [currentIdx, playing, playTrack]);
+  useEffect(() => { togglePlayRef.current = togglePlay; }, [togglePlay]);
 
   /* ── Add track ──────────────────────────────────────────────── */
   const addTrack = useCallback(async (track) => {
