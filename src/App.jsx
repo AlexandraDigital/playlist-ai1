@@ -588,7 +588,6 @@ async function downloadAudio(videoId) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const { url } = await r.json();
   if (!url) throw new Error("No download URL returned");
-  // Fetch audio directly from CDN URL returned by cobalt
   const audioRes = await fetch(url);
   if (!audioRes.ok) throw new Error(`Audio fetch failed: ${audioRes.status}`);
   const blob = await audioRes.blob();
@@ -597,14 +596,18 @@ async function downloadAudio(videoId) {
 }
 
 /* ── AI chat ────────────────────────────────────────────────── */
-async function aiChat(messages) {
+async function aiChat(system, messages) {
   const r = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ system, messages }),
   });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
+  if (!r.ok) {
+    // Show actual error from server/Groq for easier debugging
+    const errMsg = d?.error || `HTTP ${r.status}`;
+    throw new Error(errMsg);
+  }
   return d?.content?.[0]?.text || d?.choices?.[0]?.message?.content || "";
 }
 
@@ -640,8 +643,6 @@ function bumpGenCount() {
   return count;
 }
 
-const CHIPS = ["chill vibes", "hype workout", "late night drive", "sad hours", "focus mode", "k-pop bops"];
-
 export default function App() {
   const [playlist, setPlaylist] = useState([]);
   const [plName, setPlName] = useState("My Playlist");
@@ -671,11 +672,9 @@ export default function App() {
   const [language, setLanguage] = useState('en');
   const tr = TRANSLATIONS[language] || TRANSLATIONS.en;
 
-  // Pro state
   const [isPro, setIsPro] = useState(() => localStorage.getItem("playlist-ai-pro") === "true");
   const [aiGenCount, setAiGenCount] = useState(getGenCount);
 
-  // Sync state
   const [syncCode] = useState(() => {
     let code = localStorage.getItem("playlist-ai-sync-code");
     if (!code) {
@@ -687,7 +686,6 @@ export default function App() {
   const [importCode, setImportCode] = useState("");
   const [syncStatus, setSyncStatus] = useState({ msg: "", type: "" });
 
-  // Listening stats
   const [stats, setStats] = useState(() => {
     try { return JSON.parse(localStorage.getItem("playlist-ai-stats") || "{}"); } catch { return {}; }
   });
@@ -713,14 +711,32 @@ export default function App() {
   useEffect(() => { isProRef.current = isPro; }, [isPro]);
   useEffect(() => { tabRef.current = tab; }, [tab]);
 
-  // PWA install prompt
+  // Auto-save current playlist to localStorage whenever it changes
+  useEffect(() => {
+    if (playlist.length > 0) {
+      const toSave = playlist.map(({ title, artist, videoId, thumbnail, duration, hasSpotify }) =>
+        ({ title, artist, videoId, thumbnail, duration, hasSpotify }));
+      localStorage.setItem("playlist-ai-current", JSON.stringify({ name: plName, songs: toSave }));
+    }
+  }, [playlist, plName]);
+
+  // Restore current playlist on load
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("playlist-ai-current") || "null");
+      if (saved?.songs?.length) {
+        setPlaylist(saved.songs.map((s) => ({ ...s, id: Date.now() + Math.random(), ytStatus: s.videoId ? "found" : "notfound" })));
+        if (saved.name) setPlName(saved.name);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
     window.addEventListener("beforeinstallprompt", handler);
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
-  // Media Session action handlers
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
     navigator.mediaSession.setActionHandler("play", () => togglePlay());
@@ -729,12 +745,10 @@ export default function App() {
     navigator.mediaSession.setActionHandler("previoustrack", () => skipPrev());
   }, []);
 
-  // Load offline tracks
   useEffect(() => {
     IDB.getAll().then(setOfflineTracks).catch(() => {});
   }, []);
 
-  // Load YouTube IFrame API
   useEffect(() => {
     if (window.YT && window.YT.Player) { ytReadyRef.current = true; return; }
     const tag = document.createElement("script");
@@ -757,7 +771,6 @@ export default function App() {
     };
   }, []);
 
-  // PayPal SDK load when Pro modal opens
   useEffect(() => {
     if (!showPro || isPro) return;
     paypalBtnRenderedRef.current = false;
@@ -765,7 +778,6 @@ export default function App() {
     const renderBtn = () => {
       if (!paypalContainerRef.current || paypalBtnRenderedRef.current) return;
       paypalBtnRenderedRef.current = true;
-      // Clear container to avoid double-render
       paypalContainerRef.current.innerHTML = "";
       window.paypal.Buttons({
         createOrder: (data, actions) =>
@@ -808,7 +820,6 @@ export default function App() {
     }
   }, [showPro, isPro]);
 
-  // Background playback fix: when tab hidden, switch to offline blob if available
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (!document.hidden || !playingRef.current) return;
@@ -820,7 +831,6 @@ export default function App() {
 
       const blobUrl = blobUrlsRef.current[track.videoId];
       if (blobUrl) {
-        // Switch from YouTube IFrame to local Audio (browsers throttle iframes less audio elements)
         const currentTime = ytPlayerRef.current?.getCurrentTime?.() || 0;
         ytPlayerRef.current?.pauseVideo?.();
         if (audioRef.current) { audioRef.current.pause(); }
@@ -830,7 +840,6 @@ export default function App() {
         a.play().catch(() => {});
         a.onended = () => skipNext();
       }
-      // If no blob and Pro: the auto-download already started when track began
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -869,7 +878,6 @@ export default function App() {
     setCurrentIdx(idx);
     setPlaying(true);
 
-    // Listening stats
     setStats((prev) => {
       const key = t.videoId || t.title;
       const updated = { ...prev, [key]: { ...(prev[key] || {}), plays: (prev[key]?.plays || 0) + 1, title: t.title, artist: t.artist } };
@@ -877,7 +885,6 @@ export default function App() {
       return updated;
     });
 
-    // Media Session
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: t.title || "Unknown",
@@ -890,7 +897,6 @@ export default function App() {
 
     clearTimeout(autoSaveTimerRef.current);
 
-    // Offline blob available
     if (t.blobUrl || blobUrlsRef.current[t.videoId]) {
       const url = t.blobUrl || blobUrlsRef.current[t.videoId];
       if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
@@ -901,7 +907,6 @@ export default function App() {
       return;
     }
 
-    // YouTube
     if (t.videoId) {
       if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
       const doPlay = (player) => {
@@ -917,14 +922,9 @@ export default function App() {
         }, 200);
       }
 
-      // Pro: download immediately so background switch is ready fast
-      // Free: 4s delay
-      if (isProRef.current) {
-        if (!blobUrlsRef.current[t.videoId]) downloadAndSave(t);
-      } else {
-        autoSaveTimerRef.current = setTimeout(() => {
-          if (!blobUrlsRef.current[t.videoId]) downloadAndSave(t);
-        }, 4000);
+      // Pro: auto-download immediately; Free: only on manual ⬇ tap (no auto-download that interrupts stream)
+      if (isProRef.current && !blobUrlsRef.current[t.videoId]) {
+        downloadAndSave(t);
       }
     }
   }, [offlineTracks, downloadAndSave]);
@@ -995,7 +995,6 @@ export default function App() {
     const msg = userMsg || aiInput.trim();
     if (!msg || aiLoading) return;
 
-    // Free tier gate
     if (!isPro && aiGenCount >= FREE_GEN_LIMIT) {
       setShowPro(true);
       return;
@@ -1009,13 +1008,10 @@ export default function App() {
 
     try {
       const langInstruction = language === 'es' ? ' Suggest songs primarily by Spanish-language artists or popular in Spanish-speaking countries.' : language === 'zh' ? ' Suggest songs primarily by Mandarin/Cantonese artists or popular in Chinese-speaking regions.' : '';
-      const systemPrompt = `You are a music playlist AI.${langInstruction} When asked for a playlist, respond ONLY with a JSON array like:
-[{"title":"Song Name","artist":"Artist Name","duration":"3:45"},...]
-Include 6-10 songs. No explanations, just the JSON array.`;
-      const reply = await aiChat([
-        { role: "system", content: systemPrompt },
-        ...newMsgs,
-      ]);
+      const systemPrompt = `You are a music playlist AI.${langInstruction} When asked for a playlist, respond ONLY with a JSON array like:\n[{"title":"Song Name","artist":"Artist Name","duration":"3:45"},...]\nInclude 6-10 songs. No explanations, just the JSON array.`;
+
+      // Send system as separate field, conversation history as messages (without system role)
+      const reply = await aiChat(systemPrompt, newMsgs.filter(m => m.role !== 'thinking'));
 
       let songs = [];
       try {
@@ -1033,7 +1029,6 @@ Include 6-10 songs. No explanations, just the JSON array.`;
         setAiSelected(new Set(songs.map((_, i) => i)));
       }
 
-      // Bump free counter
       if (!isPro) {
         const newCount = bumpGenCount();
         setAiGenCount(newCount);
@@ -1220,12 +1215,10 @@ Include 6-10 songs. No explanations, just the JSON array.`;
     );
   };
 
-  /* ── Stats top tracks ───────────────────────────────────────── */
   const topTracks = Object.entries(stats)
     .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0))
     .slice(0, 8);
 
-  /* ── Render ─────────────────────────────────────────────────── */
   return (
     <>
       <style>{STYLES}</style>
@@ -1461,7 +1454,6 @@ Include 6-10 songs. No explanations, just the JSON array.`;
                 <span style={{ fontSize: 15, fontWeight: 600 }}>{tr.tabMyPlaylists}</span>
               </div>
 
-              {/* Cross-device sync (Pro) */}
               {isPro ? (
                 <div className="sync-panel">
                   <div className="sync-panel-title">{tr.syncTitle}</div>
@@ -1494,7 +1486,6 @@ Include 6-10 songs. No explanations, just the JSON array.`;
                 </div>
               )}
 
-              {/* New playlist form */}
               <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                 <input className="add-input" placeholder={tr.newPlaceholder} value={newPlName}
                   onChange={(e) => setNewPlName(e.target.value)}
