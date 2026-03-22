@@ -669,7 +669,7 @@ export default function App() {
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
   const [showPro, setShowPro] = useState(false);
-  const [language, setLanguage] = useState('en');
+  const [language, setLanguage] = useState(() => localStorage.getItem("playlist-ai-lang") || 'en');
   const tr = TRANSLATIONS[language] || TRANSLATIONS.en;
 
   const [isPro, setIsPro] = useState(() => localStorage.getItem("playlist-ai-pro") === "true");
@@ -693,6 +693,7 @@ export default function App() {
   const ytPlayerRef = useRef(null);
   const ytReadyRef = useRef(false);
   const playlistRef = useRef(playlist);
+  const plNameRef = useRef(plName);
   const blobUrlsRef = useRef({});
   const audioRef = useRef(null);
   const autoSaveTimerRef = useRef(null);
@@ -710,6 +711,8 @@ export default function App() {
   useEffect(() => { playingRef.current = playing; }, [playing]);
   useEffect(() => { isProRef.current = isPro; }, [isPro]);
   useEffect(() => { tabRef.current = tab; }, [tab]);
+  useEffect(() => { plNameRef.current = plName; }, [plName]);
+  useEffect(() => { localStorage.setItem("playlist-ai-lang", language); }, [language]);
 
   // Auto-save current playlist to localStorage whenever it changes
   useEffect(() => {
@@ -746,7 +749,33 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    IDB.getAll().then(setOfflineTracks).catch(() => {});
+    IDB.getAll().then((tracks) => {
+      setOfflineTracks(tracks);
+      const statusMap = {};
+      tracks.forEach((t) => {
+        if (t.blobUrl) {
+          blobUrlsRef.current[t.videoId] = t.blobUrl;
+          statusMap[t.videoId] = "done";
+        }
+      });
+      setDlStatus(statusMap);
+    }).catch(() => {});
+  }, []);
+
+  // Save state when browser/tab closes (safety net for any unsaved changes)
+  useEffect(() => {
+    const saveState = () => {
+      const pl = playlistRef.current;
+      const toSave = pl.map(({ title, artist, videoId, thumbnail, duration, hasSpotify }) =>
+        ({ title, artist, videoId, thumbnail, duration, hasSpotify }));
+      localStorage.setItem("playlist-ai-current", JSON.stringify({ name: plNameRef.current, songs: toSave }));
+    };
+    window.addEventListener("beforeunload", saveState);
+    window.addEventListener("pagehide", saveState);
+    return () => {
+      window.removeEventListener("beforeunload", saveState);
+      window.removeEventListener("pagehide", saveState);
+    };
   }, []);
 
   useEffect(() => {
