@@ -464,6 +464,13 @@ const STYLES = `
   /* INSTALL + PRO HEADER */
   .header-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
   .header-badges { display:flex; gap:8px; align-items:center; }
+  .ios-guide-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:9999; display:flex; align-items:flex-end; justify-content:center; padding:24px; }
+  .ios-guide-box { background:#1a1a1a; border:1px solid #333; border-radius:16px; padding:24px; max-width:360px; width:100%; }
+  .ios-guide-title { font-size:17px; font-weight:600; color:var(--fg); margin-bottom:16px; }
+  .ios-guide-steps { color:var(--sub); font-size:14px; line-height:1.8; padding-left:20px; margin:0 0 20px; }
+  .ios-guide-steps li { margin-bottom:8px; }
+  .ios-share-icon { font-size:16px; }
+  .ios-guide-close { width:100%; padding:12px; background:#6C63FF; border:none; border-radius:10px; color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
   .install-btn { padding:6px 12px; background:transparent; border:1px solid var(--border); border-radius:8px;
     color:var(--muted); font-family:var(--font); font-size:12px; cursor:pointer; transition:all .15s; }
   .install-btn:hover { border-color:#333; color:var(--sub); }
@@ -657,6 +664,9 @@ export default function App() {
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [aiSelected, setAiSelected] = useState(new Set());
   const [installPrompt, setInstallPrompt] = useState(null);
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
   const [showPro, setShowPro] = useState(false);
   const [language, setLanguage] = useState('en');
   const tr = TRANSLATIONS[language] || TRANSLATIONS.en;
@@ -1228,12 +1238,29 @@ Include 6-10 songs. No explanations, just the JSON array.`;
           <div className="header-top">
             <div className="logo">Playlist AI</div>
             <div className="header-badges">
-              {installPrompt && (
+              {!isStandalone && (
                 <button className="install-btn" onClick={async () => {
-                  installPrompt.prompt();
-                  const { outcome } = await installPrompt.userChoice;
-                  if (outcome === "accepted") setInstallPrompt(null);
+                  if (installPrompt) {
+                    installPrompt.prompt();
+                    const { outcome } = await installPrompt.userChoice;
+                    if (outcome === "accepted") setInstallPrompt(null);
+                  } else {
+                    setShowIOSGuide(true);
+                  }
                 }}>{tr.install}</button>
+              )}
+              {showIOSGuide && (
+                <div className="ios-guide-overlay" onClick={() => setShowIOSGuide(false)}>
+                  <div className="ios-guide-box" onClick={e => e.stopPropagation()}>
+                    <div className="ios-guide-title">Install Playlist AI</div>
+                    <ol className="ios-guide-steps">
+                      <li>Tap the <strong>Share</strong> button <span className="ios-share-icon">⎋</span> at the bottom of Safari</li>
+                      <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
+                      <li>Tap <strong>Add</strong> — done! 🎉</li>
+                    </ol>
+                    <button className="ios-guide-close" onClick={() => setShowIOSGuide(false)}>Got it</button>
+                  </div>
+                </div>
               )}
               {isPro ? (
                 <span className="pro-badge">👑 Pro</span>
