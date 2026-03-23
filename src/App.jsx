@@ -1536,7 +1536,8 @@ export default function App() {
         </div>
       </div>
     
-  };
+  
+)
 
   const topTracks = Object.entries(stats)
     .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0))
