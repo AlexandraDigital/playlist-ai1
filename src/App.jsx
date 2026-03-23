@@ -1,3 +1,4 @@
+const [deferredPrompt, setDeferredPrompt] = useState(null);
 import { useState, useRef, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,8 @@ export default function App() {
       const store = tx.objectStore("songs");
       const req = store.getAll();
 
+      
+
       req.onsuccess = () => {
         const tracks = req.result.map((item) => ({
           title: item.title,
@@ -58,6 +61,30 @@ export default function App() {
 
     load();
   }, []);
+
+  useEffect(() => {
+  const handler = (e) => {
+    e.preventDefault();
+    setDeferredPrompt(e);
+  };
+
+  window.addEventListener("beforeinstallprompt", handler);
+
+  return () =>
+    window.removeEventListener("beforeinstallprompt", handler);
+}, []);
+
+
+  const installApp = async () => {
+  if (!deferredPrompt) return;
+
+  deferredPrompt.prompt();
+  const choice = await deferredPrompt.userChoice;
+
+  if (choice.outcome === "accepted") {
+    setDeferredPrompt(null);
+  }
+};
 
   // -------------------------
   // SEARCH
@@ -78,46 +105,63 @@ export default function App() {
   // -------------------------
   // PLAY
   // -------------------------
-  const play = async (track) => {
-    try {
-      if (track.local) {
-        if (audioRef.current) audioRef.current.pause();
-        audioRef.current = new Audio(track.url);
-        audioRef.current.play();
-        return;
-      }
+ const play = async (track) => {
+  try {
+    // 🔊 LOCAL FILE
+    if (track.local) {
+      if (audioRef.current) audioRef.current.pause();
 
-      const res = await fetch(`/api/download?videoId=${track.videoId}`);
+      audioRef.current = new Audio(track.url);
 
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
+      audioRef.current.onended = () => {
+        const index = playlist.findIndex(
+          (t) => t.videoId === track.videoId
+        );
 
-        if (audioRef.current) audioRef.current.pause();
+        let nextIndex = index + 1;
+        if (nextIndex >= playlist.length) nextIndex = 0;
 
-        audioRef.current = new Audio(url);
-        audioRef.current.play();
-        return;
-      }
+        play(playlist[nextIndex]);
+      };
 
-      throw new Error();
-    } catch {
-      try {
-        const sres = await fetch(`/api/spotify-search?q=${track.title}`);
-        const sdata = await sres.json();
-        const url = sdata?.tracks?.items?.[0]?.external_urls?.spotify;
-
-        if (url) {
-          window.open(url, "_blank");
-          return;
-        }
-
-        throw new Error();
-      } catch {
-        window.open(`https://www.youtube.com/watch?v=${track.videoId}`, "_blank");
-      }
+      audioRef.current.play();
+      return;
     }
-  };
+
+    // 🌐 DOWNLOAD AUDIO
+    const res = await fetch(`/api/download?videoId=${track.videoId}`);
+
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      if (audioRef.current) audioRef.current.pause();
+
+      audioRef.current = new Audio(url);
+
+      audioRef.current.onended = () => {
+        const index = playlist.findIndex(
+          (t) => t.videoId === track.videoId
+        );
+
+        let nextIndex = index + 1;
+        if (nextIndex >= playlist.length) nextIndex = 0;
+
+        play(playlist[nextIndex]);
+      };
+
+      audioRef.current.play();
+      return;
+    }
+
+    throw new Error();
+  } catch {
+    window.open(
+      `https://www.youtube.com/watch?v=${track.videoId}`,
+      "_blank"
+    );
+  }
+};
 
   // -------------------------
   // UPLOAD (FREE)
@@ -218,6 +262,12 @@ export default function App() {
           {loading ? "..." : "AI"}
         </Button>
       </div>
+      
+      {deferredPrompt && (
+  <Button onClick={installApp} className="mt-4 bg-blue-600">
+    Install App 📱
+  </Button>
+)}
 
       {/* Upload */}
       <input
