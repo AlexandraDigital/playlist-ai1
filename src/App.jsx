@@ -1192,7 +1192,7 @@ export default function App() {
   useEffect(() => { togglePlayRef.current = togglePlay; }, [togglePlay]);
 
   /* ── Add track ──────────────────────────────────────────────── */
-  const addTrack = useCallback(async (track) => {
+   addTrack = useCallback(async (track) => {
       if (playlistRef.current.find((t) => t.title === track.title && t.artist === track.artist)) return;
         const id = Date.now() + Math.random();
 
@@ -1206,7 +1206,7 @@ export default function App() {
                           if (yt?.videoId || spotify?.spotifyId) {
                               setPlaylist((p) => [
                                     ...p,
-                                          {
+                            ? ({
                                                   ...track,
                                                           id,
                                                                   videoId: yt?.videoId || null,
