@@ -1197,70 +1197,53 @@ export default function App() {
         const id = Date.now() + Math.random();
 
           // Call search functions
-            const [yt, spotify] = await Promise.all([
-                ytSearch(track.title, track.artist),
-                    spotifySearch(track.title, track.artist),
-                      ]);
+           async function searchAndUpdatePlaylist(track, id) {
+  // Add a placeholder to playlist indicating search is in progress
+  setPlaylist((p) => [
+    ...p,
+    { ...track, id, videoId: null, thumbnail: null, ytStatus: "searching" }
+  ]);
 
-                        // Check if search found anything
-                          if (yt?.videoId || spotify?.spotifyId) {
-                              setPlaylist((p) => [
-                                    ...p,
-                             ({
-                                  ...track,
-                                        id,
-                                            videoId: yt?.videoId || null,
-                                                                          thumbnail: spotify?.thumbnail || yt?.thumbnail || null,
-                                                                                  duration: spotify?.duration || track.duration || null,
-                                                                                          title: spotify?.fullTitle || track.title,
-                                                                                                  artist: spotify?.fullArtist || track.artist,
-                                                                                                          ytStatus: yt?.videoId ? "found" : "notfound",
-                                                                                                                  hasSpotify: !!spotify,
-                                                                                                                        }) ,
-                                                                                                                            ]);
-                                                                                                                              } else {
-                                                                                                                                  // No search results
-                                                                                                                                      setPlaylist((p) => [
-                                                                                                                                            ...p,
-                                                                                                                                                  {
-                                                                                                                                                          ...track,
-                                                                                                                                                                  id,
-                                                                                                                                                                          videoId: null,
-                                                                                                                                                                                  thumbnail: null,
-                                                                                                                                                                                          duration: null,
-                                                                                                                                                                                                  title: track.title,
-                                                                                                                                                                                                          artist: track.artist,
-                                                                                                                                                                                                                  ytStatus: "notfound",
-                                                                                                                                                                                                                          hasSpotify: false,
-                                                                                                                                                                                                                                },
-                                                                                                                                                                                                                                    ]);
-                                                                                                                                                                                                                                      }
-                                                                                                                                                                                                                                      }, []);
-  }
+  // Perform parallel searches
+  const [yt, spotify] = await Promise.all([
+    ytSearch(track.title, track.artist),
+    spotifySearch(track.title, track.artist),
+  ]);
 
-    setPlaylist((p) => [...p, { ...track, id, videoId: null, thumbnail: null, ytStatus: "searching" }]);
-
-    const [yt, spotify] = await Promise.all([
-      ytSearch(track.title, track.artist),
-      spotifySearch(track.title, track.artist),
+  // Process search results here...
+  if (yt?.videoId || spotify?.spotifyId) {
+    setPlaylist((p) => [
+      ...p,
+      {
+        ...track,
+        id,
+        videoId: yt?.videoId || null,
+        thumbnail: spotify?.thumbnail || yt?.thumbnail || null,
+        duration: spotify?.duration || track.duration || null,
+        title: spotify?.fullTitle || track.title,
+        artist: spotify?.fullArtist || track.artist,
+        ytStatus: yt?.videoId ? "found" : "notfound",
+        hasSpotify: !!spotify,
+      },
     ]);
-
-    setPlaylist((p) =>
-      p.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              videoId: yt?.videoId || null,
-              thumbnail: spotify?.thumbnail || yt?.thumbnail || null,
-              duration: spotify?.duration || track.duration || null,
-              title: spotify?.fullTitle || track.title,
-              artist: spotify?.fullArtist || track.artist,
-              ytStatus: yt?.videoId ? "found" : "notfound",
-              hasSpotify: !!spotify,
-            }
-          : t
-      )
-    );
+  } else {
+    // No results found
+    setPlaylist((p) => [
+      ...p,
+      {
+        ...track,
+        id,
+        videoId: null,
+        thumbnail: null,
+        duration: null,
+        title: track.title,
+        artist: track.artist,
+        ytStatus: "notfound",
+        hasSpotify: false,
+      },
+    ]);
+  }
+}
 
     if (yt?.videoId && blobUrlsRef.current[yt.videoId]) {
       setDlStatus((s) => ({ ...s, [yt.videoId]: "done" }));
@@ -1952,10 +1935,9 @@ export default function App() {
                   <button className="pro-skip" onClick={() => setShowPro(false)}>{tr.maybeLater}</button>
                 </div>
               </>
-            )}
+            )};
           </div>
         </div>
       )}
     </>
-  
-
+   )}
