@@ -1464,6 +1464,7 @@ export default function App() {
     const isDragging = isOffline ? offDragIdx === idx : dragIdx === idx;
     const isDragOver = isOffline ? (offDragOverIdx === idx && offDragIdx !== idx) : (dragOverIdx === idx && dragIdx !== idx);
 
+
     return (
       <div
         key={t.id || t.videoId}
@@ -1530,12 +1531,11 @@ export default function App() {
             if (isOffline) {
               IDB.del(t.videoId).then(() => IDB.getAll().then(setOfflineTracks));
             } else {
-              setPlaylist((p) => p.filter((_, i) => i !== idx));
-            }
-          }}>×</button>
+              
+              setPlaylist((p) => p.filter((_, i) => i !== idx));}}}>x</button>
         </div>
       </div>
-    );
+    
   };
 
   const topTracks = Object.entries(stats)
@@ -1544,6 +1544,7 @@ export default function App() {
 
   
     <>
+    
       <style>{STYLES}</style>
       <div id="yt-player-wrap"><div id="yt-player" /></div>
       <input ref={uploadFileRef} type="file" accept="audio/*" style={{ display: "none" }} onChange={handleUploadFile} />
