@@ -1209,7 +1209,7 @@ export default function App() {
     ytSearch(track.title, track.artist),
     spotifySearch(track.title, track.artist),
   ]);
-
+           }
   // Process search results here...
   if (yt?.videoId || spotify?.spotifyId) {
     setPlaylist((p) => [
@@ -1245,8 +1245,8 @@ export default function App() {
   }
 }
 
-    if (yt?.videoId && blobUrlsRef.current[yt.videoId]) {
-      setDlStatus((s) => ({ ...s, [yt.videoId]: "done" }));
+    , (yt?.videoId && blobUrlsRef.current[yt.videoId]),
+      setDlStatus((s) => ({ ...s, [yt.videoId]: "done" })))
     }
   []
 
@@ -1543,7 +1543,7 @@ export default function App() {
     .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0))
     .slice(0, 8);
 
-  
+ return(
     <>
     
       <style>{STYLES}</style>
@@ -1941,8 +1941,10 @@ export default function App() {
               {tr.maybeLater}
             </button>
           </div>
-        </>
+       </> 
       )}
     </div>
   </div>
+)}
+</>
 )}
