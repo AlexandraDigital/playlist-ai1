@@ -70,7 +70,7 @@ export default function App() {
     };
 
     setPlaylist((prev) => [track, ...prev]);
-  };
+};
 
   return (
   <div className="min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white flex flex-col items-center p-6">
