@@ -1207,9 +1207,9 @@ export default function App() {
                               setPlaylist((p) => [
                                     ...p,
                              ({
-                                                  ...track,
-                                                          id,
-                                                                  videoId: yt?.videoId || null,
+                                  ...track,
+                                        id,
+                                            videoId: yt?.videoId || null,
                                                                           thumbnail: spotify?.thumbnail || yt?.thumbnail || null,
                                                                                   duration: spotify?.duration || track.duration || null,
                                                                                           title: spotify?.fullTitle || track.title,
@@ -1559,7 +1559,7 @@ export default function App() {
     .sort((a, b) => (b[1].plays || 0) - (a[1].plays || 0))
     .slice(0, 8);
 
-  return (
+  
     <>
       <style>{STYLES}</style>
       <div id="yt-player-wrap"><div id="yt-player" /></div>
@@ -1957,5 +1957,5 @@ export default function App() {
         </div>
       )}
     </>
-  );
+  
 
