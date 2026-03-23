@@ -1193,17 +1193,50 @@ export default function App() {
 
   /* ── Add track ──────────────────────────────────────────────── */
   const addTrack = useCallback(async (track) => {
-    if (playlistRef.current.find((t) => t.title === track.title && t.artist === track.artist)) return;
-    const id = Date.now() + Math.random();
+      if (playlistRef.current.find((t) => t.title === track.title && t.artist === track.artist)) return;
+        const id = Date.now() + Math.random();
 
-    // Fast path: videoId already known (e.g. added from Downloads tab) — skip re-searching
-    if (track.videoId) {
-      setPlaylist((p) => [...p, { ...track, id, ytStatus: "found" }]);
-      if (blobUrlsRef.current[track.videoId]) {
-        setDlStatus((s) => ({ ...s, [track.videoId]: "done" }));
-      }
-      return;
-    }
+          // Call search functions
+            const [yt, spotify] = await Promise.all([
+                ytSearch(track.title, track.artist),
+                    spotifySearch(track.title, track.artist),
+                      ]);
+
+                        // Check if search found anything
+                          if (yt?.videoId || spotify?.spotifyId) {
+                              setPlaylist((p) => [
+                                    ...p,
+                                          {
+                                                  ...track,
+                                                          id,
+                                                                  videoId: yt?.videoId || null,
+                                                                          thumbnail: spotify?.thumbnail || yt?.thumbnail || null,
+                                                                                  duration: spotify?.duration || track.duration || null,
+                                                                                          title: spotify?.fullTitle || track.title,
+                                                                                                  artist: spotify?.fullArtist || track.artist,
+                                                                                                          ytStatus: yt?.videoId ? "found" : "notfound",
+                                                                                                                  hasSpotify: !!spotify,
+                                                                                                                        },
+                                                                                                                            ]);
+                                                                                                                              } else {
+                                                                                                                                  // No search results
+                                                                                                                                      setPlaylist((p) => [
+                                                                                                                                            ...p,
+                                                                                                                                                  {
+                                                                                                                                                          ...track,
+                                                                                                                                                                  id,
+                                                                                                                                                                          videoId: null,
+                                                                                                                                                                                  thumbnail: null,
+                                                                                                                                                                                          duration: null,
+                                                                                                                                                                                                  title: track.title,
+                                                                                                                                                                                                          artist: track.artist,
+                                                                                                                                                                                                                  ytStatus: "notfound",
+                                                                                                                                                                                                                          hasSpotify: false,
+                                                                                                                                                                                                                                },
+                                                                                                                                                                                                                                    ]);
+                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                      }, []);
+  })
 
     setPlaylist((p) => [...p, { ...track, id, videoId: null, thumbnail: null, ytStatus: "searching" }]);
 
