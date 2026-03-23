@@ -57,24 +57,23 @@ export default function App() {
 
   setPlaylist(fakeSongs);
 };
-  };
+
 
   const handleUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const file = e.target.files[0];
+  if (!file) return;
 
-    const track = {
-      title: file.name,
-      videoId: "local-" + Date.now(),
-      url: URL.createObjectURL(file),
-    };
+  const track = {
+    title: file.name,
+    videoId: "local-" + Date.now(),
+    url: URL.createObjectURL(file),
+  };
 
-    setPlaylist((prev) => [track, ...prev]);
-};
+  setPlaylist((prev) => [track, ...prev]);
+};  // ✅ THIS WAS MISSING
 
-  return (
+return (
   <div className="min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white flex flex-col items-center p-6">
-
     {/* Title */}
     <h1 className="text-4xl font-bold mb-8 text-purple-400 drop-shadow-lg">
       🎧 Playlist AI
