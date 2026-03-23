@@ -1236,7 +1236,7 @@ export default function App() {
                                                                                                                                                                                                                                     ]);
                                                                                                                                                                                                                                       }
                                                                                                                                                                                                                                       }, []);
-  })
+  }
 
     setPlaylist((p) => [...p, { ...track, id, videoId: null, thumbnail: null, ytStatus: "searching" }]);
 
@@ -1265,7 +1265,7 @@ export default function App() {
     if (yt?.videoId && blobUrlsRef.current[yt.videoId]) {
       setDlStatus((s) => ({ ...s, [yt.videoId]: "done" }));
     }
-  []);
+  []
 
   /* ── AI generate ────────────────────────────────────────────── */
   const sendAI = useCallback(async (userMsg) => {
@@ -1958,4 +1958,4 @@ export default function App() {
       )}
     </>
   );
-}
+
