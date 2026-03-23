@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 
+
 const PAYPAL_CLIENT_ID = "AXNMWGjP12GGzjRS4hXihdVeXUZNsvT38UqJzJSoI0N9WsV67zo5fyV46CbB5Sp_f2wKnLzvfgyoieI8";
 const FREE_GEN_LIMIT = 5;
 
