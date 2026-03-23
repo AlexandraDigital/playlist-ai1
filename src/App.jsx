@@ -1897,64 +1897,52 @@ export default function App() {
           </div>
         )}
       </div>
-
-      {/* PRO MODAL */}
-      showPro && (
-        <div className="pro-overlay" onClick={() => setShowPro(false)}>
-          <div className="pro-modal" onClick={(e) => e.stopPropagation()}>
-            {isPro ? (
-              <div className="pro-success">
-                <div className="pro-success-icon">👑</div>
-                <div className="pro-success-title">{tr.proSuccess}</div>
-                <div className="pro-success-sub">{tr.proSuccessSub}</div>
-                <button className="pro-cta" onClick={() => setShowPro(false)}>{tr.letsGo}</button>
-              </div>
-            ) : (
-              <>
-                <div className="pro-header">
-                  <div className="pro-crown">👑</div>
-                  <div className="pro-title">{tr.proTitle}</div>
-                  <div className="pro-subtitle">{tr.proSubtitle}</div>
-                </div>
-                <div className="pro-features">
-                  {tr.proFeatures.map(([icon, name, desc]) => (
-                    <div key={name} className="pro-feat">
-                      <div className="pro-feat-icon">{icon}</div>
-                      <div className="pro-feat-text">
-                        <div className="pro-feat-name">{name}</div>
-                        <div className="pro-feat-desc">{desc}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="pro-divider" />
-                <div className="pro-pricing">
-                  <div className="pro-price">{tr.proPrice} <span>one-time</span></div>
-                  <div className="pro-one-time">{tr.proOneTime}</div>
-                </div>
-                <div className="pro-actions">
-                  <div ref={paypalContainerRef} className="paypal-container" />
-                  <button className="pro-skip" onClick={() => setShowPro(false)}>{tr.maybeLater}</button>
-                </div>
-              </>
-            )};
-            )};
-           );
-           )};
-       }    };
-       )
-        )    )};
-         }  )};
-         
-
-
-          };
-            };  
-            };
-            };
-          </div>
-      
+{/* PRO MODAL */}
+{showPro && (
+  <div className="pro-overlay" onClick={() => setShowPro(false)}>
+    <div className="pro-modal" onClick={(e) => e.stopPropagation()}>
+      {isPro ? (
+        <div className="pro-success">
+          <div className="pro-success-icon">👑</div>
+          <div className="pro-success-title">{tr.proSuccess}</div>
+          <div className="pro-success-sub">{tr.proSuccessSub}</div>
+          <button className="pro-cta" onClick={() => setShowPro(false)}>
+            {tr.letsGo}
+          </button>
         </div>
+      ) : (
+        <>
+          <div className="pro-header">
+            <div className="pro-crown">👑</div>
+            <div className="pro-title">{tr.proTitle}</div>
+            <div className="pro-subtitle">{tr.proSubtitle}</div>
+          </div>
+          <div className="pro-features">
+            {tr.proFeatures.map(([icon, name, desc]) => (
+              <div key={name} className="pro-feat">
+                <div className="pro-feat-icon">{icon}</div>
+                <div className="pro-feat-text">
+                  <div className="pro-feat-name">{name}</div>
+                  <div className="pro-feat-desc">{desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="pro-divider" />
+          <div className="pro-pricing">
+            <div className="pro-price">
+              {tr.proPrice} <span>one-time</span>
+            </div>
+            <div className="pro-one-time">{tr.proOneTime}</div>
+          </div>
+          <div className="pro-actions">
+            <div ref={paypalContainerRef} className="paypal-container" />
+            <button className="pro-skip" onClick={() => setShowPro(false)}>
+              {tr.maybeLater}
+            </button>
+          </div>
+        </>
       )}
-    </>
-}
+    </div>
+  </div>
+)}
