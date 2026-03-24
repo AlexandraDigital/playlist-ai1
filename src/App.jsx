@@ -96,51 +96,57 @@ export default function App() {
   };
 
   // 🤖 AI FIXED
-  const generateAI = async () => {
-    if (!vibe) return;
+ const generateAI = async () => {
+  if (!vibe) return;
 
-    try {
-      const res = await fetch("/ai", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ query: vibe }),
-      });
+  try {
+    const res = await fetch("/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: vibe }),
+    });
 
-      const text = await res.text();
-      const data = JSON.parse(text);
+    const data = await res.json(); // ✅ FIXED
 
-      const content = data?.choices?.[0]?.message?.content;
-      if (!content) return alert("AI failed");
+    console.log("AI:", data);
 
-      let songs = content.split("\n")
-        .map(s => s.replace(/^\d+\.\s*/, "").trim())
-        .filter(s => s.includes(" - "));
+    const songs = data.songs;
 
-      let results = [];
-
-      for (let s of songs.slice(0,10)) {
-        const [a,t] = s.split(" - ");
-        try {
-          const d = await fetchRetry(`/search?q=${encodeURIComponent(a+" "+t)}`);
-          if (d.items?.length) {
-            results.push({
-              title: d.items[0].snippet.title,
-              videoId: d.items[0].id.videoId,
-              thumbnail: d.items[0].snippet.thumbnails.medium.url,
-            });
-          }
-        } catch {}
-      }
-
-      if (!results.length) return alert("AI search failed");
-
-      // ✅ ADD instead of overwrite
-      results.forEach(addSong);
-
-    } catch {
-      alert("AI failed");
+    if (!songs || songs.length === 0) {
+      alert("AI returned no songs");
+      return;
     }
-  };
+
+    let results = [];
+
+    for (let s of songs) {
+      const [a, t] = s.split(" - ");
+
+      try {
+        const d = await fetchRetry(`/search?q=${encodeURIComponent(a + " " + t)}`);
+
+        if (d.items?.length) {
+          results.push({
+            title: d.items[0].snippet.title,
+            videoId: d.items[0].id.videoId,
+            thumbnail: d.items[0].snippet.thumbnails.medium.url,
+          });
+        }
+      } catch {}
+    }
+
+    if (!results.length) {
+      alert("AI worked but search failed");
+      return;
+    }
+
+    results.forEach(addSong);
+
+  } catch (err) {
+    console.error(err);
+    alert("AI failed");
+  }
+};
 
   // 📤 UPLOAD
   const handleUpload = (e) => {
