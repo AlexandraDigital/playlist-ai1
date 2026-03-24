@@ -1,48 +1,33 @@
 export async function onRequestPost(context) {
   try {
-    const { request, env } = context;
+    const body = await context.request.json();
+    const query = body.query;
 
-    const body = await request.json();
-    const query = body.query || "music";
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${context.env.GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          {
+            role: "user",
+            content: `Give me 8 songs (just song and artist) for this vibe: ${query}`,
+          },
+        ],
+      }),
+    });
 
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${env.GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a music expert. Return ONLY a list of 8 songs (song - artist), no extra text.",
-            },
-            {
-              role: "user",
-              content: `Give me songs for this vibe: ${query}`,
-            },
-          ],
-        }),
-      }
-    );
-
-    const data = await response.json();
+    const data = await res.json();
 
     return new Response(JSON.stringify(data), {
       headers: { "Content-Type": "application/json" },
     });
-
-  } catch (err) {
-    return new Response(
-      JSON.stringify({
-        error: "AI crashed",
-        details: err.message,
-      }),
-      { status: 500 }
-    );
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 500,
+    });
   }
 }
