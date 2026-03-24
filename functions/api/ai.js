@@ -1,9 +1,14 @@
 export async function onRequestPost(context) {
   try {
     const body = await context.request.json();
-    const query = body.query;
+    const query = body?.query || "music";
 
-    console.log("Query:", query);
+    if (!context.env.GROQ_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "Missing GROQ_API_KEY" }),
+        { status: 500 }
+      );
+    }
 
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -22,18 +27,19 @@ export async function onRequestPost(context) {
       }),
     });
 
-    const text = await res.text(); // 🔥 IMPORTANT
-    console.log("Groq raw:", text);
+    const text = await res.text(); // 🔥 don't parse yet
 
     return new Response(text, {
       headers: { "Content-Type": "application/json" },
+      status: res.status,
     });
 
   } catch (e) {
-    console.error("AI ERROR:", e);
-
     return new Response(
-      JSON.stringify({ error: e.message }),
+      JSON.stringify({
+        error: e.message,
+        stack: e.stack,
+      }),
       { status: 500 }
     );
   }
