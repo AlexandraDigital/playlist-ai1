@@ -169,7 +169,7 @@ export default function App() {
     setLoading(false);
   };
 
-  // 📤 UPLOAD
+  // 📤 UPLOAD (FIX: also add to playlist)
   const handleUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -181,29 +181,13 @@ export default function App() {
     };
 
     setUploadedSongs((prev) => [newSong, ...prev]);
+    setPlaylist((prev) => [newSong, ...prev]); // 🔥 FIX
   };
 
-  // ❌ REMOVE UPLOADED SONG
+  // ❌ REMOVE UPLOADED SONG (FIX)
   const removeUploaded = (index) => {
     setUploadedSongs((prev) => prev.filter((_, i) => i !== index));
     setPlaylist((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  // 💾 SAVE PLAYLIST
-  const savePlaylist = () => {
-    if (!playlist.length) return alert("No songs");
-    setPlaylists((prev) => [
-      { name: playlistName || "My Playlist", songs: playlist },
-      ...prev,
-    ]);
-  };
-
-  // 🧹 CLEAR (safe)
-  const clearAll = () => {
-    setPlaylist([]);
-    setVibe("");
-    setArtist("");
-    setSong("");
   };
 
   return (
@@ -214,54 +198,103 @@ export default function App() {
           🎧 Playlist AI
         </h1>
 
-        {/* UPLOAD BUTTON */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="audio/*"
-          onChange={handleUpload}
-          className="hidden"
-        />
+        {/* TOP GRID */}
+        <div className="grid md:grid-cols-2 gap-6">
 
-        <button
-          onClick={() => fileInputRef.current.click()}
-          className="w-full mb-6 p-3 rounded-xl border-2 border-dashed border-purple-500 hover:bg-purple-500/10"
-        >
-          📤 Upload Music
-        </button>
-
-        {/* SONG LIST */}
-        <div className="space-y-3">
-          {playlist.map((s, i) => (
-            <div
-              key={i}
-              draggable
-              onDragStart={() => (dragItem.current = i)}
-              onDragEnter={() => (dragOverItem.current = i)}
-              onDragEnd={handleSort}
-              onDragOver={(e) => e.preventDefault()}
-              className="flex items-center gap-3 bg-gray-900 p-3 rounded-xl"
-            >
-              {s.thumbnail && <img src={s.thumbnail} className="w-14 rounded" />}
-
-              <div className="flex-1 text-sm">{s.title}</div>
-
-              <button onClick={() => playSong(i)}>▶️</button>
-
-              <button onClick={() => toggleFavorite(s)}>
-                {favorites.find((f) => f.videoId === s.videoId) ? "❤️" : "🤍"}
+          {/* LEFT SIDE */}
+          <div>
+            {/* AI */}
+            <div className="flex flex-col gap-2 mb-4">
+              <input
+                value={vibe}
+                onChange={(e) => setVibe(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && generateAI()}
+                placeholder="Type a vibe..."
+                className="p-3 rounded-xl bg-gray-900 border border-gray-800"
+              />
+              <button onClick={generateAI} className="p-3 rounded-xl bg-purple-600 hover:bg-purple-500">
+                Generate AI Playlist
               </button>
-
-              {s.local && (
-                <button
-                  onClick={() => removeUploaded(i)}
-                  className="text-red-400 hover:text-red-300"
-                >
-                  ✖
-                </button>
-              )}
             </div>
-          ))}
+
+            {/* SEARCH */}
+            <div className="flex flex-col gap-2 mb-4">
+              <input
+                value={artist}
+                onChange={(e) => setArtist(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && searchSong()}
+                placeholder="Artist"
+                className="p-3 rounded-xl bg-gray-900 border border-gray-800"
+              />
+              <input
+                value={song}
+                onChange={(e) => setSong(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && searchSong()}
+                placeholder="Song"
+                className="p-3 rounded-xl bg-gray-900 border border-gray-800"
+              />
+            </div>
+
+            {/* ACTION BUTTONS */}
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={searchSong} className="p-2 rounded-xl bg-purple-600 hover:bg-purple-500">Add</button>
+              <button onClick={share} className="p-2 rounded-xl bg-purple-500 hover:bg-purple-400">Share</button>
+              <button onClick={() => setRepeat(!repeat)} className="p-2 rounded-xl bg-gray-800">🔁</button>
+              <button onClick={installApp} className="p-2 rounded-xl bg-purple-600 hover:bg-purple-500">Install</button>
+            </div>
+
+            {/* UPLOAD BUTTON */}
+            <div className="mt-4">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*"
+                onChange={handleUpload}
+                className="hidden"
+              />
+
+              <button
+                onClick={() => fileInputRef.current.click()}
+                className="w-full p-3 rounded-xl border-2 border-dashed border-purple-500 hover:bg-purple-500/10 transition"
+              >
+                📤 Upload Music
+              </button>
+            </div>
+          </div>
+
+          {/* RIGHT SIDE */}
+          <div>
+            <div className="space-y-3">
+              {playlist.map((s, i) => (
+                <div
+                  key={i}
+                  draggable
+                  onDragStart={() => (dragItem.current = i)}
+                  onDragEnter={() => (dragOverItem.current = i)}
+                  onDragEnd={handleSort}
+                  onDragOver={(e) => e.preventDefault()}
+                  className="flex items-center gap-3 bg-gray-900 p-3 rounded-xl"
+                >
+                  {s.thumbnail && <img src={s.thumbnail} className="w-14 rounded" />}
+                  <div className="flex-1 text-sm">{s.title}</div>
+
+                  <button onClick={() => playSong(i)}>▶️</button>
+
+                  <button onClick={() => toggleFavorite(s)}>❤️</button>
+
+                  {/* ❌ FIX: remove uploaded */}
+                  {s.local && (
+                    <button
+                      onClick={() => removeUploaded(i)}
+                      className="text-red-400 hover:text-red-300"
+                    >
+                      ✖
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* PLAYER */}
