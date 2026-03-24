@@ -21,25 +21,45 @@ export async function onRequestPost(context) {
         messages: [
           {
             role: "user",
-            content: `Give me 8 songs (artist - title) for this vibe: ${query}`,
+            content: `Give EXACTLY 10 songs in this format:
+Artist - Song
+No numbering
+No extra text
+No explanation
+Vibe: ${query}`,
           },
         ],
       }),
     });
 
-    const text = await res.text(); // ⚠️ IMPORTANT
+    const data = await res.json();
 
-    return new Response(text, {
-      headers: { "Content-Type": "application/json" },
-      status: res.status,
-    });
+    let content = data?.choices?.[0]?.message?.content || "";
+
+    // 🧠 CLEAN OUTPUT
+    const cleaned = content
+      .split("\n")
+      .map((s) =>
+        s
+          .replace(/^\d+\.\s*/, "")
+          .replace(/["“”]/g, "")
+          .replace(/\s*[-–—:]\s*/, " - ")
+          .trim()
+      )
+      .filter((s) => s.includes(" - "))
+      .slice(0, 10);
+
+    // 🔥 RETURN CLEAN STRUCTURE
+    return new Response(
+      JSON.stringify({
+        songs: cleaned,
+      }),
+      { headers: { "Content-Type": "application/json" } }
+    );
 
   } catch (e) {
     return new Response(
-      JSON.stringify({
-        error: e.message,
-        stack: e.stack,
-      }),
+      JSON.stringify({ error: e.message }),
       { status: 500 }
     );
   }
