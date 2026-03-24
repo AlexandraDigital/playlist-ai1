@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 export default function App() {
   const [vibe, setVibe] = useState("");
@@ -15,12 +15,39 @@ export default function App() {
   const dragItem = useRef();
   const dragOverItem = useRef();
 
+  // 🎧 Bounce
+  const [bounce, setBounce] = useState(true);
+  useEffect(() => {
+    setTimeout(() => setBounce(false), 1200);
+  }, []);
+
+  // 🔁 FETCH RETRY
+  const fetchRetry = async (url, retries = 3, delay = 800) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (retries > 0) {
+          await new Promise(r => setTimeout(r, delay));
+          return fetchRetry(url, retries - 1, delay * 2);
+        }
+        throw new Error(res.status);
+      }
+      return res.json();
+    } catch (e) {
+      if (retries > 0) {
+        await new Promise(r => setTimeout(r, delay));
+        return fetchRetry(url, retries - 1, delay * 2);
+      }
+      throw e;
+    }
+  };
+
   // ▶️ PLAY
   const playSong = (i) => setCurrentIndex(i);
 
   // ❌ REMOVE
-  const removeSong = (index) => {
-    setPlaylist((prev) => prev.filter((_, i) => i !== index));
+  const removeSong = (i) => {
+    setPlaylist(prev => prev.filter((_, idx) => idx !== i));
   };
 
   // 🔀 DRAG
@@ -37,20 +64,21 @@ export default function App() {
 
     try {
       const query = `${artist} ${song}`;
-      const r = await fetch(`/search?q=${encodeURIComponent(query)}`);
-      const d = await r.json();
+      const d = await fetchRetry(`/search?q=${encodeURIComponent(query)}`);
 
       if (!d.items?.length) return alert("No results");
 
       const vid = d.items[0];
 
-      const newSong = {
-        title: vid.snippet.title,
-        videoId: vid.id.videoId,
-        thumbnail: vid.snippet.thumbnails.medium.url,
-      };
+      setPlaylist(prev => [
+        {
+          title: vid.snippet.title,
+          videoId: vid.id.videoId,
+          thumbnail: vid.snippet.thumbnails.medium.url,
+        },
+        ...prev,
+      ]);
 
-      setPlaylist((prev) => [newSong, ...prev]);
       setArtist("");
       setSong("");
     } catch {
@@ -58,7 +86,7 @@ export default function App() {
     }
   };
 
-  // 🤖 AI
+  // 🤖 BULLETPROOF AI
   const generateAI = async () => {
     if (!vibe) return;
 
@@ -66,37 +94,54 @@ export default function App() {
       const res = await fetch("/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: vibe }),
+        body: JSON.stringify({
+          query: `Give 10 songs EXACTLY like:
+Artist - Song
+No extra text. Vibe: ${vibe}`,
+        }),
       });
 
       const text = await res.text();
+      console.log("AI RAW:", text);
 
       let data;
       try {
         data = JSON.parse(text);
       } catch {
-        alert("AI broken");
+        alert("AI response broken");
         return;
       }
 
-      const content = data?.choices?.[0]?.message?.content;
+      let content = data?.choices?.[0]?.message?.content;
       if (!content) return alert("AI failed");
 
-      const songs = content
+      console.log("AI CONTENT:", content);
+
+      let songs = content
         .split("\n")
-        .map((s) => s.replace(/^\d+\.\s*/, "").trim())
-        .filter((s) => s.includes(" - "));
+        .map(s =>
+          s
+            .replace(/^\d+\.\s*/, "")
+            .replace(/["“”]/g, "")
+            .replace(/\s*[-–—:]\s*/, " - ")
+            .trim()
+        )
+        .filter(s => s.includes(" - "));
+
+      if (songs.length === 0) {
+        songs = content.split(",").map(s => s.trim());
+      }
 
       let results = [];
 
       for (let s of songs.slice(0, 10)) {
-        const [artist, title] = s.split(" - ");
+        const [a, t] = s.split(" - ");
+        if (!a || !t) continue;
 
         try {
-          const r = await fetch(
-            `/search?q=${encodeURIComponent(artist + " " + title)}`
+          const d = await fetchRetry(
+            `/search?q=${encodeURIComponent(a + " " + t)}`
           );
-          const d = await r.json();
 
           if (d.items?.length) {
             results.push({
@@ -108,7 +153,7 @@ export default function App() {
         } catch {}
       }
 
-      if (!results.length) return alert("No songs found");
+      if (!results.length) return alert("Search failed — try again");
 
       setPlaylist(results);
     } catch {
@@ -121,13 +166,14 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
-    const newSong = {
-      title: file.name,
-      url: URL.createObjectURL(file),
-      local: true,
-    };
-
-    setPlaylist((prev) => [newSong, ...prev]);
+    setPlaylist(prev => [
+      {
+        title: file.name,
+        url: URL.createObjectURL(file),
+        local: true,
+      },
+      ...prev,
+    ]);
   };
 
   // 🧹 CLEAR
@@ -138,27 +184,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      <div className="w-full max-w-md sm:max-w-lg px-4">
+      <div className="w-full max-w-md sm:max-w-xl px-4">
 
-        {/* TITLE */}
+        {/* HEADER */}
+        <div className="flex justify-center items-center gap-3 mb-8">
+          <span className={`text-4xl ${bounce ? "animate-bounce" : ""}`}>🎧</span>
+          <h1 className="text-3xl sm:text-5xl font-bold bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
+            Playlist AI
+          </h1>
+        </div>
+
+        {/* NAME */}
         <input
           value={playlistName}
           onChange={(e) => setPlaylistName(e.target.value)}
-          className="text-2xl font-bold text-center w-full mb-6 bg-transparent outline-none"
+          className="w-full text-center mb-6 bg-transparent outline-none text-xl"
         />
 
         {/* AI */}
-        <input
-          value={vibe}
-          onChange={(e) => setVibe(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && generateAI()}
-          placeholder="Type a vibe..."
-          className="w-full p-3 mb-3 rounded-xl bg-gray-900 border border-gray-800"
-        />
-
-        <button className="w-full p-4 mb-4 rounded-xl bg-gradient-to-r from-purple-500 to-purple-700 hover:opacity-90 transition">
-          Generate AI Playlist
-        </button>
+        <div className="flex gap-2 mb-4">
+          <input
+            value={vibe}
+            onChange={(e) => setVibe(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && generateAI()}
+            placeholder="Type a vibe..."
+            className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800"
+          />
+          <button onClick={generateAI} className="px-4 bg-purple-600 rounded-xl">
+            AI
+          </button>
+        </div>
 
         {/* SEARCH */}
         <input
@@ -179,27 +234,20 @@ export default function App() {
 
         {/* BUTTONS */}
         <div className="grid grid-cols-2 gap-3 mb-4">
-
-          <button
-            onClick={searchSong}
-            className="p-3 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 transition"
-          >
+          <button onClick={searchSong} className="p-3 bg-purple-600 rounded-xl">
             Add
           </button>
 
-          <button
-            onClick={clearPlaylist}
-            className="p-3 rounded-xl bg-gray-700 hover:bg-gray-600 active:scale-95 transition"
-          >
+          <button onClick={clearPlaylist} className="p-3 bg-gray-700 rounded-xl">
             Clear
           </button>
 
           <button
             onClick={() => setRepeat(!repeat)}
-            className={`p-3 rounded-xl active:scale-95 transition ${
+            className={`p-3 rounded-xl ${
               repeat
-                ? "bg-purple-600 hover:bg-purple-500 shadow-lg shadow-purple-900/40"
-                : "bg-gray-700 hover:bg-gray-600"
+                ? "bg-purple-600 shadow-lg shadow-purple-900/40"
+                : "bg-gray-700"
             }`}
           >
             🔁 Repeat
@@ -207,11 +255,10 @@ export default function App() {
 
           <button
             onClick={() => fileInputRef.current.click()}
-            className="p-3 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 transition"
+            className="p-3 bg-purple-600 rounded-xl"
           >
             Upload
           </button>
-
         </div>
 
         {/* FILE */}
@@ -234,21 +281,11 @@ export default function App() {
               onDragEnter={() => (dragOverItem.current = i)}
               onDragEnd={handleSort}
               onDragOver={(e) => e.preventDefault()}
-              className="flex items-center gap-3 bg-gray-900 p-3 rounded-xl cursor-pointer hover:bg-gray-800 transition"
+              className="flex items-center gap-3 bg-gray-900 p-3 rounded-xl"
             >
-              {s.thumbnail && (
-                <img src={s.thumbnail} className="w-14 rounded" />
-              )}
-
+              {s.thumbnail && <img src={s.thumbnail} className="w-14 rounded" />}
               <div className="flex-1 text-sm">{s.title}</div>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeSong(i);
-                }}
-                className="text-red-400 hover:text-red-300"
-              >
+              <button onClick={(e) => {e.stopPropagation(); removeSong(i);}}>
                 ❌
               </button>
             </div>
