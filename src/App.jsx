@@ -200,81 +200,57 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 max-w-3xl mx-auto">
-      <h1 className="text-4xl text-center font-bold mb-6 bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
+    <div className="min-h-screen bg-black text-white px-4 py-6 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+
+      <h1 className="text-3xl sm:text-4xl text-center font-bold mb-6 bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
         🎧 Playlist AI
       </h1>
 
       {/* AI */}
-      <div className="flex gap-2 mb-4">
+      <div className="flex flex-col sm:flex-row gap-2 mb-4">
         <input
           value={vibe}
           onChange={(e) => setVibe(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && generateAI()}
           placeholder="Type a vibe..."
-          className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800 focus:border-purple-500 outline-none"
+          className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800 focus:border-purple-500"
         />
-        <button
-          onClick={generateAI}
-          className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 transition shadow-lg shadow-purple-900/30"
-        >
+        <button onClick={generateAI} className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">
           AI
         </button>
       </div>
 
       {/* SEARCH */}
-      <div className="flex gap-2 mb-4">
+      <div className="flex flex-col sm:flex-row gap-2 mb-4">
         <input
           value={artist}
           onChange={(e) => setArtist(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && searchSong()}
           placeholder="Artist"
-          className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800 focus:border-purple-500"
+          className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800"
         />
         <input
           value={song}
           onChange={(e) => setSong(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && searchSong()}
           placeholder="Song"
-          className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800 focus:border-purple-500"
+          className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800"
         />
       </div>
 
       {/* BUTTONS */}
-      <div className="flex flex-wrap gap-3 justify-center mb-4">
-        <button onClick={searchSong} className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">
-          Add Song
-        </button>
-
-        <button onClick={savePlaylist} className="px-4 py-2 rounded-xl bg-purple-800 hover:bg-purple-700">
-          Save 💾
-        </button>
-
-        <button onClick={share} className="px-4 py-2 rounded-xl bg-gray-800 hover:bg-gray-700">
-          Share 🔗
-        </button>
-
-        <button onClick={clearAll} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500">
-          Clear ❌
-        </button>
-
-        <button onClick={installApp} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">
-          Install 📱
-        </button>
-
-        <button
-          onClick={() => setPlaylist(uploadedSongs)}
-          className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600"
-        >
-          Uploaded 🎵
-        </button>
+      <div className="flex flex-wrap gap-2 justify-center mb-4">
+        <button onClick={searchSong} className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">Add</button>
+        <button onClick={savePlaylist} className="px-4 py-2 rounded-xl bg-purple-700 hover:bg-purple-600">Save</button>
+        <button onClick={share} className="px-4 py-2 rounded-xl bg-purple-500 hover:bg-purple-400">Share</button>
+        <button onClick={clearAll} className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500">Clear</button>
+        <button onClick={installApp} className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">Install</button>
+        <button onClick={() => setPlaylist(uploadedSongs)} className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500">Uploaded</button>
 
         <button
           onClick={() => setRepeat(!repeat)}
           className={`px-4 py-2 rounded-xl ${
-            repeat
-              ? "bg-purple-600 shadow-lg shadow-purple-900/40"
-              : "bg-gray-800 hover:bg-gray-700"
+            repeat ? "bg-purple-600" : "bg-gray-800 hover:bg-gray-700"
           }`}
         >
           🔁
@@ -301,18 +277,13 @@ export default function App() {
             onDragEnter={() => (dragOverItem.current = i)}
             onDragEnd={handleSort}
             onDragOver={(e) => e.preventDefault()}
-            className="flex items-center gap-3 bg-gray-900/80 p-3 rounded-xl hover:bg-gray-800 transition cursor-move border border-gray-800"
+            className="flex items-center gap-3 bg-gray-900/80 p-3 rounded-xl hover:bg-gray-800 transition border border-gray-800"
           >
-            {s.thumbnail && <img src={s.thumbnail} className="w-16 rounded" />}
-
-            <div className="flex-1">{s.title}</div>
-
+            {s.thumbnail && <img src={s.thumbnail} className="w-14 sm:w-16 rounded" />}
+            <div className="flex-1 text-sm sm:text-base">{s.title}</div>
             <button onClick={() => playSong(i)}>▶️</button>
-
             <button onClick={() => toggleFavorite(s)}>
-              {favorites.find((f) => f.videoId === s.videoId)
-                ? "❤️"
-                : "🤍"}
+              {favorites.find((f) => f.videoId === s.videoId) ? "❤️" : "🤍"}
             </button>
           </div>
         ))}
@@ -321,7 +292,7 @@ export default function App() {
       {/* PLAYER */}
       {playlist[currentIndex] &&
         (playlist[currentIndex].local ? (
-          <audio src={playlist[currentIndex].url} controls autoPlay />
+          <audio className="w-full mt-4" src={playlist[currentIndex].url} controls autoPlay />
         ) : (
           <iframe
             width="0"
@@ -332,18 +303,18 @@ export default function App() {
         ))}
 
       {/* SAVED */}
-      <h2 className="mt-8">Your Playlists</h2>
+      <h2 className="mt-8 text-lg">Your Playlists</h2>
       {playlists.map((p, i) => (
         <div
           key={i}
           onClick={() => setPlaylist(p.songs)}
-          className="bg-gray-800 p-2 mt-2 rounded cursor-pointer"
+          className="bg-gray-800 p-3 mt-2 rounded-xl cursor-pointer hover:bg-gray-700"
         >
           {p.name}
         </div>
       ))}
 
-      {loading && <p className="mt-4">Loading AI...</p>}
+      {loading && <p className="mt-4 text-center">Loading AI...</p>}
     </div>
   );
 }
