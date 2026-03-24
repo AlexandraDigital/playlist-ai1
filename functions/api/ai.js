@@ -3,6 +3,8 @@ export async function onRequestPost(context) {
     const body = await context.request.json();
     const query = body.query;
 
+    console.log("Query:", query);
+
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -14,20 +16,25 @@ export async function onRequestPost(context) {
         messages: [
           {
             role: "user",
-            content: `Give me 8 songs (just song and artist) for this vibe: ${query}`,
+            content: `Give me 8 songs (artist - title) for this vibe: ${query}`,
           },
         ],
       }),
     });
 
-    const data = await res.json();
+    const text = await res.text(); // 🔥 IMPORTANT
+    console.log("Groq raw:", text);
 
-    return new Response(JSON.stringify(data), {
+    return new Response(text, {
       headers: { "Content-Type": "application/json" },
     });
+
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500,
-    });
+    console.error("AI ERROR:", e);
+
+    return new Response(
+      JSON.stringify({ error: e.message }),
+      { status: 500 }
+    );
   }
 }
