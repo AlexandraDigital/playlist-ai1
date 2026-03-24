@@ -34,10 +34,9 @@ Vibe: ${query}`,
 
     const data = await res.json();
 
-    let content = data?.choices?.[0]?.message?.content || "";
+    const content = data?.choices?.[0]?.message?.content || "";
 
-    // 🧠 CLEAN OUTPUT
-    const cleaned = content
+    const songs = content
       .split("\n")
       .map((s) =>
         s
@@ -49,11 +48,8 @@ Vibe: ${query}`,
       .filter((s) => s.includes(" - "))
       .slice(0, 10);
 
-    // 🔥 RETURN CLEAN STRUCTURE
     return new Response(
-      JSON.stringify({
-        songs: cleaned,
-      }),
+      JSON.stringify({ songs }),
       { headers: { "Content-Type": "application/json" } }
     );
 
