@@ -50,28 +50,42 @@ export default function App() {
   };
 
   /* ---------- AI ---------- */
-  const generateAI = async () => {
-    if (!vibe.trim()) return;
-
+ const generateAI = async () => {
+  try {
     setLoading(true);
 
+    const res = await fetch("/ai", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: vibe }),
+    });
+
+    // 🔥 IMPORTANT: read as TEXT first
+    const text = await res.text();
+    console.log("AI RAW:", text);
+
+    let data;
     try {
-      const res = await fetch("/ai", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ query: vibe }),
-      });
+      data = JSON.parse(text);
+    } catch {
+      alert("AI returned invalid response");
+      return;
+    }
 
-      const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) {
+      alert("AI gave no content");
+      return;
+    }
 
-      const text = data?.choices?.[0]?.message?.content || "";
-      const songs = text.split("\n").filter(Boolean);
+    const songs = content.split("\n").filter(Boolean);
 
-      let results = [];
+    let results = [];
 
-      for (let s of songs.slice(0, 8)) {
+    for (let s of songs.slice(0, 8)) {
+      try {
         const r = await fetch(`/search?q=${encodeURIComponent(s)}`);
         const d = await r.json();
 
@@ -83,17 +97,18 @@ export default function App() {
           thumbnail: vid.snippet.thumbnails.medium.url,
           url: `https://www.youtube.com/watch?v=${vid.id.videoId}`,
         });
-      }
-
-      setPlaylist(results);
-    } catch (e) {
-      console.error(e);
-      alert("AI failed");
+      } catch {}
     }
 
-    setLoading(false);
-  };
+    setPlaylist(results);
 
+  } catch (e) {
+    console.error(e);
+    alert("AI failed");
+  }
+
+  setLoading(false);
+};
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center p-6">
 
