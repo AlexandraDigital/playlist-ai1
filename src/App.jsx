@@ -103,9 +103,11 @@ const generateAI = async () => {
       method: "POST",
       body: JSON.stringify({ query }),
     });
+const raw = await res.text();
+console.log("AI raw:", raw);
 
-    const data = await res.json();
-    const text = data.choices[0].message.content;
+const data = JSON.parse(raw);
+const text = data.choices[0].message.content;
 
     // 2. Clean list
     const songs = text
