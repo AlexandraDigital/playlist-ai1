@@ -5,8 +5,8 @@ export default function App() {
   const [artist, setArtist] = useState("");
   const [song, setSong] = useState("");
 
-  const [playlist, setPlaylist] = useState([]);
-  const [playlistName, setPlaylistName] = useState("My Playlist");
+  const [playlists, setPlaylists] = useState([]);
+  const [currentPlaylist, setCurrentPlaylist] = useState(0);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [repeat, setRepeat] = useState(false);
@@ -15,47 +15,61 @@ export default function App() {
   const dragItem = useRef();
   const dragOverItem = useRef();
 
-  // 🎧 Bounce
-  const [bounce, setBounce] = useState(true);
+  const active = playlists[currentPlaylist] || { name: "My Playlist", songs: [] };
+
+  // 💾 LOAD
   useEffect(() => {
-    setTimeout(() => setBounce(false), 1200);
+    const saved = localStorage.getItem("library");
+    if (saved) {
+      setPlaylists(JSON.parse(saved));
+    } else {
+      setPlaylists([{ name: "My Playlist", songs: [] }]);
+    }
   }, []);
 
-  // 🔁 FETCH RETRY
-  const fetchRetry = async (url, retries = 3, delay = 800) => {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        if (retries > 0) {
-          await new Promise(r => setTimeout(r, delay));
-          return fetchRetry(url, retries - 1, delay * 2);
-        }
-        throw new Error(res.status);
-      }
-      return res.json();
-    } catch (e) {
-      if (retries > 0) {
-        await new Promise(r => setTimeout(r, delay));
-        return fetchRetry(url, retries - 1, delay * 2);
-      }
-      throw e;
-    }
-  };
+  // 💾 SAVE
+  useEffect(() => {
+    localStorage.setItem("library", JSON.stringify(playlists));
+  }, [playlists]);
 
-  // ▶️ PLAY
-  const playSong = (i) => setCurrentIndex(i);
+  // ➕ ADD SONG
+  const addSong = (songObj) => {
+    const updated = [...playlists];
+    updated[currentPlaylist].songs.unshift(songObj);
+    setPlaylists(updated);
+  };
 
   // ❌ REMOVE
   const removeSong = (i) => {
-    setPlaylist(prev => prev.filter((_, idx) => idx !== i));
+    const updated = [...playlists];
+    updated[currentPlaylist].songs.splice(i, 1);
+    setPlaylists(updated);
   };
 
   // 🔀 DRAG
   const handleSort = () => {
-    let list = [...playlist];
+    let list = [...active.songs];
     const dragged = list.splice(dragItem.current, 1)[0];
     list.splice(dragOverItem.current, 0, dragged);
-    setPlaylist(list);
+
+    const updated = [...playlists];
+    updated[currentPlaylist].songs = list;
+    setPlaylists(updated);
+  };
+
+  // 🔁 RETRY
+  const fetchRetry = async (url, retries = 3) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error();
+      return res.json();
+    } catch {
+      if (retries) {
+        await new Promise(r => setTimeout(r, 800));
+        return fetchRetry(url, retries - 1);
+      }
+      throw new Error();
+    }
   };
 
   // 🔍 SEARCH
@@ -63,21 +77,16 @@ export default function App() {
     if (!artist && !song) return;
 
     try {
-      const query = `${artist} ${song}`;
-      const d = await fetchRetry(`/search?q=${encodeURIComponent(query)}`);
-
+      const d = await fetchRetry(`/search?q=${encodeURIComponent(artist + " " + song)}`);
       if (!d.items?.length) return alert("No results");
 
       const vid = d.items[0];
 
-      setPlaylist(prev => [
-        {
-          title: vid.snippet.title,
-          videoId: vid.id.videoId,
-          thumbnail: vid.snippet.thumbnails.medium.url,
-        },
-        ...prev,
-      ]);
+      addSong({
+        title: vid.snippet.title,
+        videoId: vid.id.videoId,
+        thumbnail: vid.snippet.thumbnails.medium.url,
+      });
 
       setArtist("");
       setSong("");
@@ -86,63 +95,33 @@ export default function App() {
     }
   };
 
-  // 🤖 BULLETPROOF AI
+  // 🤖 AI FIXED
   const generateAI = async () => {
     if (!vibe) return;
 
     try {
       const res = await fetch("/ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: `Give 10 songs EXACTLY like:
-Artist - Song
-No extra text. Vibe: ${vibe}`,
-        }),
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ query: vibe }),
       });
 
       const text = await res.text();
-      console.log("AI RAW:", text);
+      const data = JSON.parse(text);
 
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        alert("AI response broken");
-        return;
-      }
-
-      let content = data?.choices?.[0]?.message?.content;
+      const content = data?.choices?.[0]?.message?.content;
       if (!content) return alert("AI failed");
 
-      console.log("AI CONTENT:", content);
-
-      let songs = content
-        .split("\n")
-        .map(s =>
-          s
-            .replace(/^\d+\.\s*/, "")
-            .replace(/["“”]/g, "")
-            .replace(/\s*[-–—:]\s*/, " - ")
-            .trim()
-        )
+      let songs = content.split("\n")
+        .map(s => s.replace(/^\d+\.\s*/, "").trim())
         .filter(s => s.includes(" - "));
-
-      if (songs.length === 0) {
-        songs = content.split(",").map(s => s.trim());
-      }
 
       let results = [];
 
-      for (let s of songs.slice(0, 10)) {
-        const [a, t] = s.split(" - ");
-        if (!a || !t) continue;
-
+      for (let s of songs.slice(0,10)) {
+        const [a,t] = s.split(" - ");
         try {
-          const d = await fetchRetry(
-            `/search?q=${encodeURIComponent(a + " " + t)}`
-          );
-
+          const d = await fetchRetry(`/search?q=${encodeURIComponent(a+" "+t)}`);
           if (d.items?.length) {
             results.push({
               title: d.items[0].snippet.title,
@@ -153,9 +132,11 @@ No extra text. Vibe: ${vibe}`,
         } catch {}
       }
 
-      if (!results.length) return alert("Search failed — try again");
+      if (!results.length) return alert("AI search failed");
 
-      setPlaylist(results);
+      // ✅ ADD instead of overwrite
+      results.forEach(addSong);
+
     } catch {
       alert("AI failed");
     }
@@ -166,152 +147,104 @@ No extra text. Vibe: ${vibe}`,
     const file = e.target.files[0];
     if (!file) return;
 
-    setPlaylist(prev => [
-      {
-        title: file.name,
-        url: URL.createObjectURL(file),
-        local: true,
-      },
-      ...prev,
-    ]);
+    addSong({
+      title: file.name,
+      url: URL.createObjectURL(file),
+      local: true,
+    });
   };
 
   // 🧹 CLEAR
   const clearPlaylist = () => {
-    setPlaylist([]);
-    setCurrentIndex(0);
+    const updated = [...playlists];
+    updated[currentPlaylist].songs = [];
+    setPlaylists(updated);
+  };
+
+  // ➕ NEW PLAYLIST
+  const newPlaylist = () => {
+    setPlaylists([...playlists, { name: "New Playlist", songs: [] }]);
+    setCurrentPlaylist(playlists.length);
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      <div className="w-full max-w-md sm:max-w-xl px-4">
+    <div className="min-h-screen bg-black text-white flex justify-center">
+      <div className="w-full max-w-xl p-4">
 
         {/* HEADER */}
-        <div className="flex justify-center items-center gap-3 mb-8">
-          <span className={`text-4xl ${bounce ? "animate-bounce" : ""}`}>🎧</span>
-          <h1 className="text-3xl sm:text-5xl font-bold bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
-            Playlist AI
-          </h1>
+        <h1 className="text-4xl text-center mb-6 bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
+          🎧 Playlist AI
+        </h1>
+
+        {/* PLAYLIST SWITCH */}
+        <div className="flex gap-2 overflow-x-auto mb-4">
+          {playlists.map((p, i) => (
+            <button
+              key={i}
+              onClick={() => setCurrentPlaylist(i)}
+              className={`px-3 py-1 rounded ${i===currentPlaylist ? "bg-purple-600" : "bg-gray-700"}`}
+            >
+              {p.name}
+            </button>
+          ))}
+          <button onClick={newPlaylist} className="bg-purple-600 px-3 rounded">+</button>
         </div>
 
         {/* NAME */}
         <input
-          value={playlistName}
-          onChange={(e) => setPlaylistName(e.target.value)}
-          className="w-full text-center mb-6 bg-transparent outline-none text-xl"
+          value={active.name}
+          onChange={(e)=>{
+            const updated=[...playlists];
+            updated[currentPlaylist].name=e.target.value;
+            setPlaylists(updated);
+          }}
+          className="w-full text-center mb-4 bg-transparent"
         />
 
         {/* AI */}
-        <div className="flex gap-2 mb-4">
-          <input
-            value={vibe}
-            onChange={(e) => setVibe(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && generateAI()}
-            placeholder="Type a vibe..."
-            className="flex-1 p-3 rounded-xl bg-gray-900 border border-gray-800"
-          />
-          <button onClick={generateAI} className="px-4 bg-purple-600 rounded-xl">
-            AI
-          </button>
-        </div>
+        <input value={vibe} onChange={(e)=>setVibe(e.target.value)}
+          onKeyDown={(e)=>e.key==="Enter"&&generateAI()}
+          placeholder="Vibe..."
+          className="w-full p-2 mb-2 bg-gray-900"
+        />
+
+        <button onClick={generateAI} className="w-full bg-purple-600 p-2 mb-4 rounded">
+          Generate AI
+        </button>
 
         {/* SEARCH */}
-        <input
-          value={artist}
-          onChange={(e) => setArtist(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && searchSong()}
-          placeholder="Artist"
-          className="w-full p-3 mb-2 rounded-xl bg-gray-900 border border-gray-800"
-        />
+        <input value={artist} onChange={(e)=>setArtist(e.target.value)} placeholder="Artist" className="w-full p-2 mb-2 bg-gray-900"/>
+        <input value={song} onChange={(e)=>setSong(e.target.value)} placeholder="Song" className="w-full p-2 mb-2 bg-gray-900"/>
 
-        <input
-          value={song}
-          onChange={(e) => setSong(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && searchSong()}
-          placeholder="Song"
-          className="w-full p-3 mb-3 rounded-xl bg-gray-900 border border-gray-800"
-        />
+        <button onClick={searchSong} className="w-full bg-purple-600 p-2 mb-4 rounded">
+          Add Song
+        </button>
 
-        {/* BUTTONS */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <button onClick={searchSong} className="p-3 bg-purple-600 rounded-xl">
-            Add
-          </button>
-
-          <button onClick={clearPlaylist} className="p-3 bg-gray-700 rounded-xl">
-            Clear
-          </button>
-
-          <button
-            onClick={() => setRepeat(!repeat)}
-            className={`p-3 rounded-xl ${
-              repeat
-                ? "bg-purple-600 shadow-lg shadow-purple-900/40"
-                : "bg-gray-700"
-            }`}
-          >
-            🔁 Repeat
-          </button>
-
-          <button
-            onClick={() => fileInputRef.current.click()}
-            className="p-3 bg-purple-600 rounded-xl"
-          >
-            Upload
-          </button>
+        {/* ACTIONS */}
+        <div className="flex gap-2 mb-4">
+          <button onClick={clearPlaylist} className="flex-1 bg-gray-700 p-2 rounded">Clear</button>
+          <button onClick={()=>setRepeat(!repeat)} className={`flex-1 p-2 rounded ${repeat?"bg-purple-600":"bg-gray-700"}`}>🔁</button>
+          <button onClick={()=>fileInputRef.current.click()} className="flex-1 bg-purple-600 p-2 rounded">Upload</button>
         </div>
 
-        {/* FILE */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="audio/*"
-          onChange={handleUpload}
-          className="hidden"
-        />
+        <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleUpload} hidden/>
 
-        {/* PLAYLIST */}
-        <div className="space-y-3">
-          {playlist.map((s, i) => (
-            <div
-              key={i}
-              draggable
-              onClick={() => playSong(i)}
-              onDragStart={() => (dragItem.current = i)}
-              onDragEnter={() => (dragOverItem.current = i)}
-              onDragEnd={handleSort}
-              onDragOver={(e) => e.preventDefault()}
-              className="flex items-center gap-3 bg-gray-900 p-3 rounded-xl"
-            >
-              {s.thumbnail && <img src={s.thumbnail} className="w-14 rounded" />}
-              <div className="flex-1 text-sm">{s.title}</div>
-              <button onClick={(e) => {e.stopPropagation(); removeSong(i);}}>
-                ❌
-              </button>
-            </div>
-          ))}
-        </div>
+        {/* SONGS */}
+        {active.songs.map((s,i)=>(
+          <div key={i} draggable
+            onClick={()=>setCurrentIndex(i)}
+            onDragStart={()=>dragItem.current=i}
+            onDragEnter={()=>dragOverItem.current=i}
+            onDragEnd={handleSort}
+            onDragOver={(e)=>e.preventDefault()}
+            className="flex gap-3 bg-gray-900 p-2 mb-2 rounded"
+          >
+            {s.thumbnail && <img src={s.thumbnail} className="w-12"/>}
+            <div className="flex-1">{s.title}</div>
+            <button onClick={(e)=>{e.stopPropagation();removeSong(i)}}>❌</button>
+          </div>
+        ))}
 
-        {/* PLAYER */}
-        {playlist[currentIndex] &&
-          (playlist[currentIndex].local ? (
-            <audio
-              key={currentIndex}
-              className="w-full mt-6"
-              src={playlist[currentIndex].url}
-              controls
-              autoPlay
-              loop={repeat}
-            />
-          ) : (
-            <iframe
-              key={currentIndex}
-              width="0"
-              height="0"
-              src={`https://www.youtube.com/embed/${playlist[currentIndex].videoId}?autoplay=1&loop=${repeat ? 1 : 0}`}
-              allow="autoplay"
-            />
-          ))}
       </div>
     </div>
   );
