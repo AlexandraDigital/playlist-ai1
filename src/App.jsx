@@ -93,7 +93,7 @@ export default function App() {
 
       let results = [];
       for (let s of songs) {
-        let res = await fetch(`/api/search?q=${encodeURIComponent(s)}`);
+        let res = await fetch(`/functions/search?q=${encodeURIComponent(s)}`);
         let d = await res.json();
         const vid = d.items?.[0];
         if (vid) results.push({ title: vid.snippet.title, videoId: vid.id.videoId });
