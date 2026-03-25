@@ -69,7 +69,7 @@ export default function App() {
     if (!artist && !song) return;
     try {
       const q = `${artist} ${song}`;
-      let res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      let res = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
       let data = await res.json();
       const vid = data.items?.[0];
       if (!vid) return alert("No results");
