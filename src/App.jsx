@@ -32,6 +32,8 @@ const TRANSLATIONS = {
     remove: "Remove song",
     toggleRepeat: "Toggle repeat",
     defaultPlaylist: "My Playlist",
+    confirmReplace: "This will replace all songs in your playlist. Continue?",
+    spotifyRepeatNote: "Use ↺ inside the Spotify player for repeat",
   },
   es: {
     appName: "Playlist AI",
@@ -64,6 +66,8 @@ const TRANSLATIONS = {
     remove: "Eliminar canción",
     toggleRepeat: "Repetir",
     defaultPlaylist: "Mi Playlist",
+    confirmReplace: "Esto reemplazará todas las canciones de tu playlist. ¿Continuar?",
+    spotifyRepeatNote: "Usa ↺ dentro del reproductor de Spotify para repetir",
   },
   zh: {
     appName: "Playlist AI",
@@ -96,6 +100,8 @@ const TRANSLATIONS = {
     remove: "移除歌曲",
     toggleRepeat: "切换循环",
     defaultPlaylist: "我的歌单",
+    confirmReplace: "这将替换歌单中的所有歌曲，是否继续？",
+    spotifyRepeatNote: "请使用 Spotify 播放器内的 ↺ 按钮来循环播放",
   },
 };
 
@@ -166,17 +172,28 @@ export default function App() {
     localStorage.setItem("playerState", JSON.stringify({ currentPlaylist, currentIndex }));
   }, [playlists, currentPlaylist, currentIndex]);
 
+  // BUG FIX #2: avoid mutating nested state — create new songs array
   const addSong = (s) => {
     const updated = [...playlists];
-    updated[currentPlaylist].songs.unshift(s);
+    updated[currentPlaylist] = {
+      ...updated[currentPlaylist],
+      songs: [s, ...updated[currentPlaylist].songs],
+    };
     setPlaylists(updated);
   };
 
+  // BUG FIX #1 + #2: correct index adjustment when removing + no mutation
   const removeSong = (i) => {
     const updated = [...playlists];
-    updated[currentPlaylist].songs.splice(i, 1);
+    const newSongs = [...updated[currentPlaylist].songs];
+    newSongs.splice(i, 1);
+    updated[currentPlaylist] = { ...updated[currentPlaylist], songs: newSongs };
     setPlaylists(updated);
-    setCurrentIndex((prev) => Math.min(prev, Math.max(0, updated[currentPlaylist].songs.length - 1)));
+    setCurrentIndex((prev) => {
+      if (newSongs.length === 0) return 0;
+      if (i < prev) return prev - 1;           // song removed before current → shift back
+      return Math.min(prev, newSongs.length - 1); // song removed at/after current → clamp
+    });
   };
 
   const newPlaylist = () => {
@@ -201,10 +218,11 @@ export default function App() {
     setTimeout(() => renameInputRef.current?.focus(), 50);
   };
 
+  // BUG FIX #2: avoid mutating nested playlist object
   const confirmRename = () => {
     if (renameValue.trim()) {
       const updated = [...playlists];
-      updated[currentPlaylist].name = renameValue.trim();
+      updated[currentPlaylist] = { ...updated[currentPlaylist], name: renameValue.trim() };
       setPlaylists(updated);
     }
     setIsRenaming(false);
@@ -218,7 +236,7 @@ export default function App() {
     const songs = [...updated[currentPlaylist].songs];
     const [moved] = songs.splice(dragIndex, 1);
     songs.splice(i, 0, moved);
-    updated[currentPlaylist].songs = songs;
+    updated[currentPlaylist] = { ...updated[currentPlaylist], songs };
     setPlaylists(updated);
     if (currentIndex === dragIndex) setCurrentIndex(i);
     else if (currentIndex > dragIndex && currentIndex <= i) setCurrentIndex(currentIndex - 1);
@@ -268,8 +286,10 @@ export default function App() {
     } catch (e) { alert(t.searchFailed + e.message); }
   };
 
+  // BUG FIX #4: confirm before replacing + BUG FIX #2: no mutation
   const generateAI = async () => {
     if (!vibe) return;
+    if (active.songs.length > 0 && !window.confirm(t.confirmReplace)) return;
     setLoading(true);
     try {
       const data = await safeFetchJSON("/ai", {
@@ -303,7 +323,7 @@ export default function App() {
       }
       if (!results.length) { alert(t.aiNoFind); setLoading(false); return; }
       const updated = [...playlists];
-      updated[currentPlaylist].songs = results;
+      updated[currentPlaylist] = { ...updated[currentPlaylist], songs: results };
       setPlaylists(updated);
       setCurrentIndex(0);
     } catch (e) {
@@ -312,9 +332,10 @@ export default function App() {
     setLoading(false);
   };
 
+  // BUG FIX #2: no mutation
   const clearPlaylist = () => {
     const updated = [...playlists];
-    updated[currentPlaylist].songs = [];
+    updated[currentPlaylist] = { ...updated[currentPlaylist], songs: [] };
     setPlaylists(updated);
     setCurrentIndex(0);
   };
@@ -323,6 +344,7 @@ export default function App() {
   const prevSong = () => { if (!active.songs.length) return; setCurrentIndex((prev) => (prev - 1 + active.songs.length) % active.songs.length); };
 
   const currentSong = active.songs[currentIndex];
+  const isSpotify = currentSong?.source === "spotify";
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col">
@@ -436,24 +458,38 @@ export default function App() {
 
               <div className="flex justify-center gap-3 mb-3">
                 <button onClick={prevSong} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition">⏮</button>
+
+                {/* BUG FIX #3: disable repeat for Spotify (iframe has no JS API) */}
                 <button
-                  onClick={() => setRepeat(!repeat)}
-                  className={`px-4 py-2 rounded-xl transition ${repeat ? "bg-purple-600" : "bg-gray-700 hover:bg-gray-600"}`}
-                  title={t.toggleRepeat}
+                  onClick={() => !isSpotify && setRepeat(!repeat)}
+                  className={`px-4 py-2 rounded-xl transition ${
+                    isSpotify
+                      ? "bg-gray-800 text-gray-600 cursor-not-allowed"
+                      : repeat
+                      ? "bg-purple-600"
+                      : "bg-gray-700 hover:bg-gray-600"
+                  }`}
+                  title={isSpotify ? t.spotifyRepeatNote : t.toggleRepeat}
+                  disabled={isSpotify}
                 >🔁</button>
+
                 <button onClick={nextSong} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition">⏭</button>
               </div>
 
               {currentSong.source === "local" ? (
                 <audio src={currentSong.url} controls autoPlay loop={repeat} className="w-full" />
               ) : currentSong.source === "spotify" ? (
-                <iframe
-                  className="w-full rounded-xl"
-                  height="152"
-                  src={currentSong.spotifyEmbedUrl}
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                  loading="lazy"
-                />
+                <>
+                  <iframe
+                    className="w-full rounded-xl"
+                    height="152"
+                    src={currentSong.spotifyEmbedUrl}
+                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                    loading="lazy"
+                  />
+                  {/* BUG FIX #3: hint that repeat is inside Spotify player */}
+                  <p className="text-xs text-gray-500 text-center mt-2">{t.spotifyRepeatNote}</p>
+                </>
               ) : (
                 <iframe
                   className="w-full rounded-xl"
