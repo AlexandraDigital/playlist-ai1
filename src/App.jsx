@@ -265,12 +265,8 @@ export default function App() {
     if (!contentType.includes("application/json")) {
       throw new Error(`Endpoint ${url} returned non-JSON. Check Cloudflare Pages deployment and API keys.`);
     }
-    const json = await res.json();
-    // Throw on HTTP errors so callers can catch them properly
-    if (!res.ok) {
-      throw new Error(json.error || `HTTP ${res.status} from ${url}`);
-    }
-    return json;
+    // Functions always return 200 with an optional "error" field — no HTTP 500s so Chrome doesn't log them
+    return res.json();
   };
 
   // Fetch YouTube and Spotify in parallel, return a combined song object
@@ -283,28 +279,38 @@ export default function App() {
       safeFetchJSON(`/spotify?q=${encodeURIComponent(query)}`),
     ]);
 
-    // Handle YouTube result
+    // Handle YouTube result — functions return 200 with optional error field
     let vid = null;
     if (ytResult.status === "fulfilled") {
-      vid = ytResult.value.items?.[0] || null;
-      ytErrorCountRef.current = 0; // reset on success
+      const ytData = ytResult.value;
+      if (ytData.error) {
+        // Check if it's quota/rate-limit
+        const isQuota = /quota|limit exceeded|daily|forbidden|permission|rate/i.test(ytData.error);
+        ytErrorCountRef.current += 1;
+        if (isQuota || ytErrorCountRef.current >= 3) {
+          ytQuotaRef.current = true;
+          setYtQuotaExceeded(true);
+        }
+      } else {
+        vid = ytData.items?.[0] || null;
+        ytErrorCountRef.current = 0; // reset on success
+      }
     } else {
-      // YouTube threw — check if it looks like quota/rate-limit (multiple error wordings)
-      const errMsg = ytResult.reason?.message || "";
-      const isQuota = /quota|limit exceeded|daily|forbidden|permission|rate/i.test(errMsg);
+      // Network-level failure (no response at all)
       ytErrorCountRef.current += 1;
-      if (isQuota || ytErrorCountRef.current >= 3) {
+      if (ytErrorCountRef.current >= 3) {
         ytQuotaRef.current = true;
         setYtQuotaExceeded(true);
       }
     }
 
-    // Handle Spotify result
+    // Handle Spotify result — functions return 200 with optional error field
     let spotifyTrack = null;
     if (spotifyResult.status === "fulfilled") {
       spotifyTrack = spotifyResult.value.track || null;
+      // spotifyResult.value.error is ignored — Spotify failing is soft, song just has no Spotify tab
     }
-    // If Spotify rejected, spotifyTrack stays null — song will be YouTube-only or skipped
+    // If Spotify rejected (network error), spotifyTrack stays null
 
     if (!vid && !spotifyTrack) return null;
 

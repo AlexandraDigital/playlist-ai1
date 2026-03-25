@@ -4,94 +4,91 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+const json200 = (body) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+
+// Module-level token cache — shared across requests in the same Cloudflare isolate
+// This means 20 parallel song requests reuse the same token instead of each fetching one
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getSpotifyToken(clientId, clientSecret) {
+  const now = Date.now();
+  if (cachedToken && now < tokenExpiry) return cachedToken;
+
+  const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + btoa(clientId + ":" + clientSecret),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+
+  const tokenData = await tokenRes.json();
+
+  if (!tokenRes.ok || !tokenData.access_token) {
+    throw new Error(
+      tokenData.error_description ||
+        "Failed to get Spotify access token. Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET."
+    );
+  }
+
+  cachedToken = tokenData.access_token;
+  // Cache with 60s buffer before actual expiry
+  tokenExpiry = now + (tokenData.expires_in - 60) * 1000;
+  return cachedToken;
+}
+
 export async function onRequestGet({ request, env }) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q");
 
-  if (!q) {
-    return new Response(JSON.stringify({ error: "Missing query" }), {
-      status: 400,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
-  }
+  if (!q) return json200({ track: null, error: "Missing query" });
 
   if (!env.SPOTIFY_CLIENT_ID || !env.SPOTIFY_CLIENT_SECRET) {
-    return new Response(
-      JSON.stringify({
-        error:
-          "SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is not set. Go to Cloudflare Pages → Settings → Environment Variables and add both.",
-      }),
-      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-    );
+    return json200({
+      track: null,
+      error: "SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is not set. Go to Cloudflare Pages → Settings → Environment Variables and add both.",
+    });
   }
 
   try {
-    // 🔐 Get Spotify token
-    const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
-      method: "POST",
-      headers: {
-        Authorization:
-          "Basic " +
-          btoa(env.SPOTIFY_CLIENT_ID + ":" + env.SPOTIFY_CLIENT_SECRET),
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: "grant_type=client_credentials",
-    });
+    const accessToken = await getSpotifyToken(env.SPOTIFY_CLIENT_ID, env.SPOTIFY_CLIENT_SECRET);
 
-    const tokenData = await tokenRes.json();
-
-    if (!tokenRes.ok || !tokenData.access_token) {
-      return new Response(
-        JSON.stringify({
-          error:
-            tokenData.error_description ||
-            "Failed to get Spotify access token. Check your SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.",
-        }),
-        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-      );
-    }
-
-    const accessToken = tokenData.access_token;
-
-    // 🔍 Search track
     const searchRes = await fetch(
       `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=1`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
     const data = await searchRes.json();
 
     if (!searchRes.ok) {
-      return new Response(
-        JSON.stringify({ error: data.error?.message || `Spotify search failed (status ${searchRes.status})` }),
-        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-      );
-    }
-
-    const track = data.tracks?.items?.[0];
-
-    if (!track) {
-      return new Response(JSON.stringify({ track: null }), {
-        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      // If token was rejected (401), clear the cache so next request gets a fresh token
+      if (searchRes.status === 401) {
+        cachedToken = null;
+        tokenExpiry = 0;
+      }
+      return json200({
+        track: null,
+        error: data.error?.message || `Spotify search failed (status ${searchRes.status})`,
       });
     }
 
-    return new Response(
-      JSON.stringify({
-        track: {
-          title: `${track.name} - ${track.artists[0].name}`,
-          embedUrl: `https://open.spotify.com/embed/track/${track.id}`,
-        },
-      }),
-      { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-    );
+    const track = data.tracks?.items?.[0];
+    if (!track) return json200({ track: null });
+
+    return json200({
+      track: {
+        title: `${track.name} - ${track.artists[0].name}`,
+        embedUrl: `https://open.spotify.com/embed/track/${track.id}`,
+      },
+    });
   } catch (e) {
-    return new Response(
-      JSON.stringify({ error: e.message }),
-      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-    );
+    return json200({ track: null, error: e.message });
   }
 }
 

@@ -4,24 +4,22 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+const json200 = (body) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+
 export async function onRequestGet({ request, env }) {
   const q = new URL(request.url).searchParams.get("q");
 
-  if (!q) {
-    return new Response(JSON.stringify({ items: [] }), {
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-    });
-  }
+  if (!q) return json200({ items: [] });
 
   if (!env.YOUTUBE_API_KEY) {
-    return new Response(
-      JSON.stringify({
-        items: [],
-        error:
-          "YOUTUBE_API_KEY is not set. Go to Cloudflare Pages → Settings → Environment Variables and add YOUTUBE_API_KEY.",
-      }),
-      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-    );
+    return json200({
+      items: [],
+      error: "YOUTUBE_API_KEY is not set. Go to Cloudflare Pages → Settings → Environment Variables and add YOUTUBE_API_KEY.",
+    });
   }
 
   try {
@@ -31,23 +29,15 @@ export async function onRequestGet({ request, env }) {
     const ytData = await ytRes.json();
 
     if (!ytRes.ok || ytData.error) {
-      const errMsg =
-        ytData.error?.message || `YouTube API error (status ${ytRes.status})`;
-      return new Response(
-        JSON.stringify({ items: [], error: errMsg }),
-        { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-      );
+      return json200({
+        items: [],
+        error: ytData.error?.message || `YouTube API error (status ${ytRes.status})`,
+      });
     }
 
-    return new Response(
-      JSON.stringify({ items: ytData.items || [] }),
-      { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-    );
+    return json200({ items: ytData.items || [] });
   } catch (e) {
-    return new Response(
-      JSON.stringify({ items: [], error: e.message }),
-      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
-    );
+    return json200({ items: [], error: e.message });
   }
 }
 
