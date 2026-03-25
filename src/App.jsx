@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 
 export default function App() {
   const [vibe, setVibe] = useState("");
@@ -10,36 +10,24 @@ export default function App() {
 
   const active = playlists[currentPlaylist];
 
-  // Add song
   const addSong = (s) => {
     const updated = [...playlists];
     updated[currentPlaylist].songs.unshift(s);
     setPlaylists(updated);
   };
 
-  // Remove song
   const removeSong = (i) => {
     const updated = [...playlists];
     updated[currentPlaylist].songs.splice(i, 1);
     setPlaylists(updated);
   };
 
-  // Mock search
   const searchSong = async () => {
     if (!artist && !song) return;
-
     try {
       const q = `${artist} ${song}`;
-      const vid = {
-        id: { videoId: "dQw4w9WgXcQ" },
-        snippet: { title: q || "Mock Song" },
-      };
-
-      addSong({
-        title: vid.snippet.title,
-        videoId: vid.id.videoId,
-      });
-
+      const vid = { id: { videoId: "dQw4w9WgXcQ" }, snippet: { title: q || "Mock Song" } };
+      addSong({ title: vid.snippet.title, videoId: vid.id.videoId });
       setArtist("");
       setSong("");
     } catch (e) {
@@ -48,29 +36,20 @@ export default function App() {
     }
   };
 
-  // AI playlist
   const generateAI = async () => {
     if (!vibe) return;
-
     try {
       const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: vibe }),
       });
-
       const data = await res.json();
-
       if (!data.songs || !data.songs.length) {
         alert("AI failed or returned no songs");
         return;
       }
-
-      const results = data.songs.map((s) => ({
-        title: s,
-        videoId: "dQw4w9WgXcQ", // placeholder video
-      }));
-
+      const results = data.songs.map((s) => ({ title: s, videoId: "dQw4w9WgXcQ" }));
       const updated = [...playlists];
       updated[currentPlaylist].songs = results;
       setPlaylists(updated);
@@ -84,21 +63,16 @@ export default function App() {
     <div className="min-h-screen bg-black text-white p-4">
       <h1 className="text-3xl mb-4 text-purple-400">Playlist AI</h1>
 
-      {/* AI input */}
       <input
         value={vibe}
         onChange={(e) => setVibe(e.target.value)}
         placeholder="Enter a vibe..."
         className="w-full p-2 mb-2 bg-gray-900 rounded"
       />
-      <button
-        onClick={generateAI}
-        className="w-full bg-purple-600 p-2 mb-4 rounded"
-      >
+      <button onClick={generateAI} className="w-full bg-purple-600 p-2 mb-4 rounded">
         Generate AI Playlist
       </button>
 
-      {/* Manual search */}
       <input
         value={artist}
         onChange={(e) => setArtist(e.target.value)}
@@ -111,25 +85,17 @@ export default function App() {
         placeholder="Song"
         className="w-full p-2 mb-2 bg-gray-900 rounded"
       />
-      <button
-        onClick={searchSong}
-        className="w-full bg-purple-600 p-2 mb-4 rounded"
-      >
+      <button onClick={searchSong} className="w-full bg-purple-600 p-2 mb-4 rounded">
         Add Song
       </button>
 
-      {/* Playlist display */}
       {active.songs.map((s, i) => (
-        <div
-          key={i}
-          className="bg-gray-800 p-2 mb-2 flex justify-between rounded"
-        >
+        <div key={i} className="bg-gray-800 p-2 mb-2 flex justify-between rounded">
           {s.title}
           <button onClick={() => removeSong(i)}>❌</button>
         </div>
       ))}
 
-      {/* Player */}
       {active.songs[0] && (
         <iframe
           className="w-full mt-4"
@@ -140,3 +106,5 @@ export default function App() {
     </div>
   );
 }
+
+      
