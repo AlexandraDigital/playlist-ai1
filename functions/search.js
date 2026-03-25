@@ -16,12 +16,12 @@ export async function onRequestGet(context) {
 
     for (let key of keys) {
       const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q)}&key=${key}`
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q + " song")}&key=${key}`
       );
 
-      const data = await res.json();
+      if (!res.ok) continue;
 
-      if (data.error) continue;
+      const data = await res.json();
 
       const valid = data.items?.filter((i) => i.id?.videoId) || [];
 
