@@ -136,7 +136,7 @@ export default function App() {
 
       // 🟢 Spotify fallback
       if (!vid) {
-        const spRes = await fetch(`/spotify?q=${encodeURIComponent(q)}`);
+        const spRes = await fetch("/spotify-search?q=${encodeURIComponent(q)}`);
         const spData = await spRes.json();
         const track = spData.items?.[0];
 
