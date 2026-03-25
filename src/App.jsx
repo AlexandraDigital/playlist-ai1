@@ -10,28 +10,26 @@ export default function App() {
 
   const active = playlists[currentPlaylist];
 
-  // ➕ Add song
+  // Add song
   const addSong = (s) => {
     const updated = [...playlists];
     updated[currentPlaylist].songs.unshift(s);
     setPlaylists(updated);
   };
 
-  // ❌ Remove song
+  // Remove song
   const removeSong = (i) => {
     const updated = [...playlists];
     updated[currentPlaylist].songs.splice(i, 1);
     setPlaylists(updated);
   };
 
-  // 🔍 SEARCH (mocked)
+  // Mock search
   const searchSong = async () => {
     if (!artist && !song) return;
 
     try {
       const q = `${artist} ${song}`;
-
-      // Mock YouTube search result
       const vid = {
         id: { videoId: "dQw4w9WgXcQ" },
         snippet: { title: q || "Mock Song" },
@@ -50,7 +48,7 @@ export default function App() {
     }
   };
 
-  // 🤖 AI
+  // AI playlist
   const generateAI = async () => {
     if (!vibe) return;
 
@@ -68,9 +66,9 @@ export default function App() {
         return;
       }
 
-      const results = data.songs.map((s, i) => ({
+      const results = data.songs.map((s) => ({
         title: s,
-        videoId: "dQw4w9WgXcQ", // placeholder video for demo
+        videoId: "dQw4w9WgXcQ", // placeholder video
       }));
 
       const updated = [...playlists];
@@ -86,7 +84,7 @@ export default function App() {
     <div className="min-h-screen bg-black text-white p-4">
       <h1 className="text-3xl mb-4 text-purple-400">Playlist AI</h1>
 
-      {/* AI */}
+      {/* AI input */}
       <input
         value={vibe}
         onChange={(e) => setVibe(e.target.value)}
@@ -100,7 +98,7 @@ export default function App() {
         Generate AI Playlist
       </button>
 
-      {/* Search */}
+      {/* Manual search */}
       <input
         value={artist}
         onChange={(e) => setArtist(e.target.value)}
@@ -120,7 +118,7 @@ export default function App() {
         Add Song
       </button>
 
-      {/* Playlist */}
+      {/* Playlist display */}
       {active.songs.map((s, i) => (
         <div
           key={i}
