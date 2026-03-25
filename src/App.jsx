@@ -72,13 +72,27 @@ export default function App() {
     return null;
   };
 
+  // Helper: safe JSON fetch that detects HTML error pages
+  const safeFetchJSON = async (url, options) => {
+    const res = await fetch(url, options);
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      // The endpoint returned HTML — the Cloudflare function may not be deployed
+      throw new Error(
+        `The ${url} endpoint returned an HTML page instead of JSON. ` +
+        `Make sure your Cloudflare Pages functions are deployed and GROQ_API_KEY is set in ` +
+        `Cloudflare Pages → Settings → Environment Variables.`
+      );
+    }
+    return res.json();
+  };
+
   // Search song — YouTube first, Spotify fallback
   const searchSong = async () => {
     if (!artist && !song) return;
     try {
       const q = `${artist} ${song}`;
-      const res = await fetch(`/search?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
+      const data = await safeFetchJSON(`/search?q=${encodeURIComponent(q)}`);
       const vid = data.items?.[0];
       if (vid) {
         addSong({ title: vid.snippet.title, videoId: vid.id.videoId, source: "youtube" });
@@ -92,7 +106,7 @@ export default function App() {
         }
       }
       setArtist(""); setSong("");
-    } catch { alert("Search failed"); }
+    } catch (e) { alert("Search failed: " + e.message); }
   };
 
   // AI playlist — YouTube first, Spotify fallback per song
@@ -100,12 +114,12 @@ export default function App() {
     if (!vibe) return;
     setLoading(true);
     try {
-      const res = await fetch("/ai", {
+      const data = await safeFetchJSON("/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: vibe }),
       });
-      const data = await res.json();
+
       const songs = data.songs;
 
       if (!songs?.length) {
@@ -118,8 +132,7 @@ export default function App() {
       for (const s of songs) {
         // Try YouTube first
         try {
-          const r = await fetch(`/search?q=${encodeURIComponent(s)}`);
-          const d = await r.json();
+          const d = await safeFetchJSON(`/search?q=${encodeURIComponent(s)}`);
           const vid = d.items?.[0];
           if (vid) {
             results.push({ title: vid.snippet.title, videoId: vid.id.videoId, source: "youtube" });

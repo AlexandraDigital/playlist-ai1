@@ -15,6 +15,21 @@ export async function onRequest({ request, env }) {
   }
 
   try {
+    // Check for API key first
+    if (!env.GROQ_API_KEY) {
+      return new Response(
+        JSON.stringify({
+          songs: [],
+          error:
+            "GROQ_API_KEY is not set. Go to Cloudflare Pages → Settings → Environment Variables and add GROQ_API_KEY.",
+        }),
+        {
+          status: 500,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     // Get user input
     const { query } = await request.json();
 
@@ -48,7 +63,32 @@ export async function onRequest({ request, env }) {
       }),
     });
 
+    // Check if Groq returned a valid JSON response
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      const raw = await res.text();
+      return new Response(
+        JSON.stringify({ songs: [], error: `Groq API returned unexpected response (status ${res.status}). Check your API key.` }),
+        {
+          status: 500,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     const data = await res.json();
+
+    // Handle Groq API errors (e.g., invalid key, rate limit)
+    if (!res.ok || data.error) {
+      const errMsg = data.error?.message || `Groq API error (status ${res.status})`;
+      return new Response(
+        JSON.stringify({ songs: [], error: errMsg }),
+        {
+          status: 500,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        }
+      );
+    }
 
     // Extract text safely
     const text = data?.choices?.[0]?.message?.content || "";
