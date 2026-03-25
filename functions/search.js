@@ -1,4 +1,9 @@
 export async function onRequestGet(context) {
+  const keys = [
+    context.env.YOUTUBE_API_KEY_1,
+    context.env.YOUTUBE_API_KEY_2,
+  ].filter(Boolean);
+
   try {
     const url = new URL(context.request.url);
     const q = url.searchParams.get("q");
@@ -9,24 +14,28 @@ export async function onRequestGet(context) {
       });
     }
 
-    const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=5&q=${encodeURIComponent(
-        q
-      )}&key=${context.env.YOUTUBE_API_KEY}`
-    );
+    for (let key of keys) {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q)}&key=${key}`
+      );
 
-    const data = await res.json();
+      const data = await res.json();
 
-    // ✅ filter ONLY valid videos
-    const validItems =
-      data.items?.filter((item) => item.id?.videoId) || [];
+      if (data.error) continue;
 
-    return new Response(JSON.stringify({ items: validItems }), {
+      const valid = data.items?.filter((i) => i.id?.videoId) || [];
+
+      if (valid.length) {
+        return new Response(JSON.stringify({ items: valid }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    return new Response(JSON.stringify({ items: [] }), {
       headers: { "Content-Type": "application/json" },
     });
-  } catch (e) {
-    return new Response(JSON.stringify({ items: [], error: e.message }), {
-      status: 500,
-    });
+  } catch {
+    return new Response(JSON.stringify({ items: [] }), { status: 500 });
   }
 }
