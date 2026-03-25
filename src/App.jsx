@@ -269,7 +269,7 @@ export default function App() {
   const fetchBoth = async (query) => {
     const [ytData, spotifyData] = await Promise.all([
       safeFetchJSON(`/search?q=${encodeURIComponent(query)}`).catch(() => ({ items: [] })),
-      fetch(`/spotify?q=${encodeURIComponent(query)}`).then((r) => r.json()).catch(() => null),
+      safeFetchJSON(`/spotify?q=${encodeURIComponent(query)}`).catch(() => null),
     ]);
 
     const vid = ytData.items?.[0] || null;
@@ -525,7 +525,7 @@ export default function App() {
                   className="w-full rounded-xl"
                   height="200"
                   src={`https://www.youtube.com/embed/${currentSong.videoId}?autoplay=1&loop=${repeat ? 1 : 0}&playlist=${currentSong.videoId}`}
-                  allow="autoplay"
+                  allow="autoplay; encrypted-media"
                 />
               )}
 
