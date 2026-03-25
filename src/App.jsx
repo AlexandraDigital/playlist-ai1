@@ -69,7 +69,7 @@ export default function App() {
     if (!artist && !song) return;
     try {
       const q = `${artist} ${song}`;
-      let res = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
+      let res = await fetch(`/functions/search?q=${encodeURIComponent(q)}`)
       let data = await res.json();
       const vid = data.items?.[0];
       if (!vid) return alert("No results");
@@ -82,7 +82,7 @@ export default function App() {
   const generateAI = async () => {
     if (!vibe) return;
     try {
-      const res = await fetch("/api/ai", {
+      const res = await fetch("/functions/ai", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ query: vibe }),
