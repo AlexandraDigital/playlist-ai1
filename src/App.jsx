@@ -17,7 +17,6 @@ export default function App() {
   const [showInstallHint, setShowInstallHint] = useState(false);
 
   const fileInputRef = useRef();
-
   const active = playlists[currentPlaylist];
 
   // INSTALL
@@ -122,28 +121,32 @@ export default function App() {
     }
   };
 
-  // 🔍 SEARCH (YouTube → Spotify fallback)
+  // 🔍 SEARCH (FIXED)
   const searchSong = async () => {
     if (!artist && !song) return;
 
     try {
       const q = `${artist} ${song}`;
 
-      // 🔴 YouTube first
-      let res = await fetch("/spotify-search?q=${encodeURIComponent(q)}`);
+      // 🔴 YouTube FIRST (FIXED)
+      let res = await fetch(`/search?q=${encodeURIComponent(q)}`);
       let data = await res.json();
       let vid = data.items?.[0];
 
-      // 🟢 Spotify fallback
+      // 🟢 Spotify fallback (FIXED ROUTE + SAFE QUERY)
       if (!vid) {
-        const spRes = await fetch("/spotify-search?q=${encodeURIComponent(q)}`);
+        const spRes = await fetch(`/spotify-search?q=${encodeURIComponent(q)}`);
         const spData = await spRes.json();
         const track = spData.items?.[0];
 
         if (track) {
+          const retryQuery =
+            track.query || `${track.artist} ${track.title}`;
+
           const retry = await fetch(
-            `/search?q=${encodeURIComponent(track.query)}`
+            `/search?q=${encodeURIComponent(retryQuery)}`
           );
+
           const retryData = await retry.json();
           vid = retryData.items?.[0];
         }
@@ -163,7 +166,7 @@ export default function App() {
     }
   };
 
-  // 🤖 AI (improved fallback chain)
+  // 🤖 AI (FIXED ROUTE)
   const generateAI = async () => {
     if (!vibe) return;
 
@@ -182,23 +185,23 @@ export default function App() {
       let results = [];
 
       for (let s of songs) {
-        let vid;
-
-        // 🔴 YouTube first
         let res = await fetch(`/search?q=${encodeURIComponent(s)}`);
         let d = await res.json();
-        vid = d.items?.[0];
+        let vid = d.items?.[0];
 
-        // 🟢 Spotify fallback
         if (!vid) {
-          const spRes = await fetch(`/spotify?q=${encodeURIComponent(s)}`);
+          const spRes = await fetch(`/spotify-search?q=${encodeURIComponent(s)}`);
           const spData = await spRes.json();
           const track = spData.items?.[0];
 
           if (track) {
+            const retryQuery =
+              track.query || `${track.artist} ${track.title}`;
+
             const retry = await fetch(
-              `/search?q=${encodeURIComponent(track.query)}`
+              `/search?q=${encodeURIComponent(retryQuery)}`
             );
+
             const retryData = await retry.json();
             vid = retryData.items?.[0];
           }
