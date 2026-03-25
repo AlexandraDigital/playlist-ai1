@@ -16,14 +16,15 @@ export async function onRequestGet(context) {
 
     for (let key of keys) {
       const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=1&q=${encodeURIComponent(q + " song")}&key=${key}`
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=5&q=${encodeURIComponent(q + " official audio")}&key=${key}`
       );
 
       if (!res.ok) continue;
 
       const data = await res.json();
 
-      const valid = data.items?.filter((i) => i.id?.videoId) || [];
+      const valid =
+        data.items?.filter((i) => i.id?.videoId) || [];
 
       if (valid.length) {
         return new Response(JSON.stringify({ items: valid }), {
