@@ -1,6 +1,7 @@
 export async function onRequestPost({ request, env }) {
   try {
     const { query } = await request.json();
+
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
