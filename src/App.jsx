@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 export default function App() {
   const [vibe, setVibe] = useState("");
@@ -139,10 +139,16 @@ export default function App() {
       <h1 className="text-3xl mb-4 text-purple-400">Playlist AI</h1>
 
       {/* AI */}
+      <label htmlFor="vibe" className="sr-only">
+        Enter a vibe
+      </label>
       <input
+        id="vibe"
+        name="vibe"
         value={vibe}
         onChange={(e) => setVibe(e.target.value)}
         placeholder="Enter a vibe..."
+        autoComplete="off"
         className="w-full p-2 mb-2 bg-gray-900 rounded"
       />
       <button
@@ -153,16 +159,28 @@ export default function App() {
       </button>
 
       {/* Search */}
+      <label htmlFor="artist" className="sr-only">
+        Artist name
+      </label>
       <input
+        id="artist"
+        name="artist"
         value={artist}
         onChange={(e) => setArtist(e.target.value)}
         placeholder="Artist"
+        autoComplete="name"
         className="w-full p-2 mb-2 bg-gray-900 rounded"
       />
+      <label htmlFor="song" className="sr-only">
+        Song title
+      </label>
       <input
+        id="song"
+        name="song"
         value={song}
         onChange={(e) => setSong(e.target.value)}
         placeholder="Song"
+        autoComplete="off"
         className="w-full p-2 mb-2 bg-gray-900 rounded"
       />
       <button
