@@ -3,7 +3,10 @@ export async function onRequestPost({ request, env }) {
     const { query } = await request.json();
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         model: "llama3-70b-8192",
         messages: [
@@ -15,10 +18,14 @@ export async function onRequestPost({ request, env }) {
 
     const data = await res.json();
     const text = data.choices?.[0]?.message?.content || "";
-    const songs = text.split("\n").map((line) => line.replace(/^\d+\.\s*/, "").replace(/["']/g, "").trim()).filter((line) => line.includes(" - "));
+
+    const songs = text
+      .split("\n")
+      .map(line => line.replace(/^\d+\.\s*/, "").replace(/["']/g, "").trim())
+      .filter(line => line.includes(" - "));
+
     return new Response(JSON.stringify({ songs }), { headers: { "Content-Type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ songs: [], error: e.message }), { status: 500 });
   }
 }
-      
