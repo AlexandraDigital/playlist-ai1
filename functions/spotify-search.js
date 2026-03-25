@@ -3,6 +3,12 @@ export async function onRequestGet(context) {
     const url = new URL(context.request.url);
     const q = url.searchParams.get("q");
 
+    if (!q) {
+      return new Response(JSON.stringify({ items: [] }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     const tokenRes = await fetch("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: {
@@ -21,6 +27,17 @@ export async function onRequestGet(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
+    if (!token) {
+      return new Response(
+        JSON.stringify({
+          items: [],
+          error: "Spotify token failed",
+          raw: tokenData,
+        }),
+        { status: 500 }
+      );
+    }
+
     const res = await fetch(
       `https://api.spotify.com/v1/search?q=${encodeURIComponent(q)}&type=track&limit=3`,
       {
@@ -34,13 +51,16 @@ export async function onRequestGet(context) {
       data.tracks?.items.map((t) => ({
         artist: t.artists[0].name,
         title: t.name,
-        query: `${t.artists[0].name} ${t.name} official audio`, // 🔥 improved
+        query: `${t.artists[0].name} ${t.name} official audio`,
       })) || [];
 
     return new Response(JSON.stringify({ items }), {
       headers: { "Content-Type": "application/json" },
     });
-  } catch {
-    return new Response(JSON.stringify({ items: [] }), { status: 500 });
+  } catch (e) {
+    return new Response(
+      JSON.stringify({ items: [], error: e.message }),
+      { status: 500 }
+    );
   }
 }
