@@ -14,34 +14,41 @@ export async function onRequestPost(context) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "llama3-70b-8192",
         messages: [
           {
+            role: "system",
+            content: "You only output clean song lists.",
+          },
+          {
             role: "user",
-            content: `Give EXACTLY 10 songs in this format:
+            content: `Give 10 songs for this vibe: ${query}.
+Format EXACTLY:
 Artist - Song
-No numbering
-No extra text
-No explanation
-Vibe: ${query}`,
+No numbering. No extra text.`,
           },
         ],
       }),
     });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return new Response(JSON.stringify({ error: err }), { status: 500 });
+    }
 
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content || "";
 
     const songs = content
       .split("\n")
-      .map(s =>
-        s
+      .map(line =>
+        line
           .replace(/^\d+\.\s*/, "")
           .replace(/["“”]/g, "")
           .replace(/\s*[-–—:]\s*/, " - ")
           .trim()
       )
-      .filter(s => s.includes(" - "))
+      .filter(line => line.includes(" - "))
       .slice(0, 10);
 
     return new Response(JSON.stringify({ songs }), {
