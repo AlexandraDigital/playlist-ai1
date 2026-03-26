@@ -860,11 +860,9 @@ export default function App() {
             <button onClick={clearPlaylist} className="flex-1 bg-gray-800 hover:bg-gray-700 p-2 rounded-xl text-sm transition">
               {t.clear}
             </button>
-            {deferredPrompt && (
-              <button onClick={installApp} className="flex-1 bg-purple-700 hover:bg-purple-600 p-2 rounded-xl text-sm transition">
-                {t.install}
-              </button>
-            )}
+            <button onClick={installApp} className="flex-1 bg-purple-700 hover:bg-purple-600 p-2 rounded-xl text-sm transition">
+              {t.install}
+            </button>
           </div>
         </div>
 
