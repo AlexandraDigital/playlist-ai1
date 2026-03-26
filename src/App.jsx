@@ -9,7 +9,7 @@ const TRANSLATIONS = {
     generateBtn: "⚡ Generate AI Playlist",
     addSong: "🔍 Add Song",
     artistPlaceholder: "Artist",
-    songPlaceholder: "Song title",
+    songPlaceholder: "Song title or paste Spotify URL",
     addSongBtn: "Add Song",
     nowPlaying: "🎵 Now Playing",
     clear: "🗑 Clear",
@@ -23,11 +23,11 @@ const TRANSLATIONS = {
     cantDelete: "Can't delete the last playlist",
     newPlaylistPrompt: "Name your playlist:",
     newPlaylistDefault: "New Playlist",
-    noResults: "No results found on YouTube or Spotify",
+    noResults: "No results found on YouTube",
     searchFailed: "Search failed: ",
     aiError: "AI error: ",
     aiNoSongs: "AI returned no songs — make sure GROQ_API_KEY is set in Cloudflare Pages → Settings → Environment Variables",
-    aiNoFind: "Couldn't find any songs. Check your API keys.",
+    aiNoFind: "Couldn't find any songs on YouTube. The daily quota may be exceeded — try again after midnight Pacific Time.",
     dragToReorder: "Drag to reorder",
     remove: "Remove song",
     toggleRepeat: "Toggle repeat",
@@ -45,7 +45,7 @@ const TRANSLATIONS = {
     generateBtn: "⚡ Generar Playlist con IA",
     addSong: "🔍 Agregar Canción",
     artistPlaceholder: "Artista",
-    songPlaceholder: "Título de la canción",
+    songPlaceholder: "Título o pega URL de Spotify",
     addSongBtn: "Agregar",
     nowPlaying: "🎵 Reproduciendo",
     clear: "🗑 Borrar",
@@ -59,11 +59,11 @@ const TRANSLATIONS = {
     cantDelete: "No se puede eliminar la última playlist",
     newPlaylistPrompt: "Nombre tu playlist:",
     newPlaylistDefault: "Nueva Playlist",
-    noResults: "No se encontraron resultados en YouTube o Spotify",
+    noResults: "No se encontraron resultados en YouTube",
     searchFailed: "Búsqueda fallida: ",
     aiError: "Error de IA: ",
     aiNoSongs: "La IA no devolvió canciones — asegúrate de tener GROQ_API_KEY configurado en Cloudflare Pages",
-    aiNoFind: "No se encontraron canciones. Verifica tus claves de API.",
+    aiNoFind: "No se encontraron canciones en YouTube. La cuota diaria puede estar agotada — intenta después de medianoche (hora del Pacífico).",
     dragToReorder: "Arrastrar para reordenar",
     remove: "Eliminar canción",
     toggleRepeat: "Repetir",
@@ -81,7 +81,7 @@ const TRANSLATIONS = {
     generateBtn: "⚡ AI 生成歌单",
     addSong: "🔍 添加歌曲",
     artistPlaceholder: "歌手",
-    songPlaceholder: "歌曲名称",
+    songPlaceholder: "歌曲名称或粘贴 Spotify 链接",
     addSongBtn: "添加",
     nowPlaying: "🎵 正在播放",
     clear: "🗑 清空",
@@ -95,11 +95,11 @@ const TRANSLATIONS = {
     cantDelete: "无法删除最后一个歌单",
     newPlaylistPrompt: "请输入歌单名称：",
     newPlaylistDefault: "新歌单",
-    noResults: "在 YouTube 或 Spotify 上未找到结果",
+    noResults: "在 YouTube 上未找到结果",
     searchFailed: "搜索失败：",
     aiError: "AI 错误：",
     aiNoSongs: "AI 未返回歌曲 — 请确保在 Cloudflare Pages 中设置了 GROQ_API_KEY",
-    aiNoFind: "未找到任何歌曲，请检查您的 API 密钥。",
+    aiNoFind: "在 YouTube 上未找到歌曲，每日配额可能已用完，请在太平洋时间午夜后重试。",
     dragToReorder: "拖动以重新排序",
     remove: "移除歌曲",
     toggleRepeat: "切换循环",
@@ -137,8 +137,8 @@ export default function App() {
   // "youtube" | "spotify" — which player tab is active for the current song
   const [sourceTab, setSourceTab] = useState("youtube");
   const [ytQuotaExceeded, setYtQuotaExceeded] = useState(false);
-  const ytQuotaRef = useRef(false); // ref so fetchBoth sees it immediately inside loops
-  const ytErrorCountRef = useRef(0); // consecutive YouTube errors → auto-disable YouTube
+  const ytQuotaRef = useRef(false);
+  const ytErrorCountRef = useRef(0);
 
   const fileInputRef = useRef();
   const renameInputRef = useRef();
@@ -265,76 +265,71 @@ export default function App() {
     if (!contentType.includes("application/json")) {
       throw new Error(`Endpoint ${url} returned non-JSON. Check Cloudflare Pages deployment and API keys.`);
     }
-    // Functions always return 200 with an optional "error" field — no HTTP 500s so Chrome doesn't log them
     return res.json();
   };
 
-  // Fetch YouTube and Spotify in parallel, return a combined song object
-  const fetchBoth = async (query) => {
-    const [ytResult, spotifyResult] = await Promise.allSettled([
-      // Skip YouTube entirely this session if quota was already hit
-      ytQuotaRef.current
-        ? Promise.resolve({ items: [] })
-        : safeFetchJSON(`/search?q=${encodeURIComponent(query)}`),
-      safeFetchJSON(`/spotify?q=${encodeURIComponent(query)}`),
-    ]);
+  // Search YouTube only and return a song object (or null)
+  const fetchYouTube = async (query) => {
+    // Skip if quota already exceeded this session
+    if (ytQuotaRef.current) return null;
 
-    // Handle YouTube result — functions return 200 with optional error field
-    let vid = null;
-    if (ytResult.status === "fulfilled") {
-      const ytData = ytResult.value;
-      if (ytData.error) {
-        // Check if it's quota/rate-limit
-        const isQuota = /quota|limit exceeded|daily|forbidden|permission|rate/i.test(ytData.error);
-        ytErrorCountRef.current += 1;
-        if (isQuota || ytErrorCountRef.current >= 3) {
-          ytQuotaRef.current = true;
-          setYtQuotaExceeded(true);
-        }
-      } else {
-        vid = ytData.items?.[0] || null;
-        ytErrorCountRef.current = 0; // reset on success
-      }
-    } else {
-      // Network-level failure (no response at all)
+    let ytData;
+    try {
+      ytData = await safeFetchJSON(`/search?q=${encodeURIComponent(query)}`);
+    } catch (e) {
       ytErrorCountRef.current += 1;
       if (ytErrorCountRef.current >= 3) {
         ytQuotaRef.current = true;
         setYtQuotaExceeded(true);
       }
+      throw e;
     }
 
-    // Handle Spotify result — functions return 200 with optional error field
-    let spotifyTrack = null;
-    let spotifyError = null;
-    if (spotifyResult.status === "fulfilled") {
-      spotifyTrack = spotifyResult.value.track || null;
-      spotifyError = spotifyResult.value.error || null; // capture error for diagnostics
-    } else {
-      spotifyError = spotifyResult.reason?.message || "Spotify network error";
-    }
-
-    if (!vid && !spotifyTrack) {
-      // Both failed — throw Spotify error so callers can show it to the user
-      if (spotifyError) throw new Error(`Spotify: ${spotifyError}`);
+    if (ytData.error) {
+      const isQuota = /quota|limit exceeded|daily|forbidden|permission|rate/i.test(ytData.error);
+      ytErrorCountRef.current += 1;
+      if (isQuota || ytErrorCountRef.current >= 3) {
+        ytQuotaRef.current = true;
+        setYtQuotaExceeded(true);
+      }
       return null;
     }
 
-    const source = vid && spotifyTrack ? "both" : vid ? "youtube" : "spotify";
+    const vid = ytData.items?.[0] || null;
+    if (!vid) return null;
+
+    ytErrorCountRef.current = 0;
     return {
-      title: vid ? vid.snippet.title : spotifyTrack.title,
-      videoId: vid ? vid.id.videoId : null,
-      thumbnail: vid ? `https://img.youtube.com/vi/${vid.id.videoId}/mqdefault.jpg` : null,
-      spotifyEmbedUrl: spotifyTrack ? spotifyTrack.embedUrl : null,
-      source,
+      title: vid.snippet.title,
+      videoId: vid.id.videoId,
+      thumbnail: `https://img.youtube.com/vi/${vid.id.videoId}/mqdefault.jpg`,
+      spotifyEmbedUrl: null,
+      source: "youtube",
     };
   };
 
   const searchSong = async () => {
     if (!artist && !song) return;
+
+    // Detect a pasted Spotify track URL → embed directly, no API needed
+    const spotifyMatch = song.match(/open\.spotify\.com\/track\/([a-zA-Z0-9]+)/);
+    if (spotifyMatch) {
+      const trackId = spotifyMatch[1];
+      addSong({
+        title: artist ? `${artist} — Spotify` : "Spotify Track",
+        videoId: null,
+        thumbnail: null,
+        spotifyEmbedUrl: `https://open.spotify.com/embed/track/${trackId}`,
+        source: "spotify",
+      });
+      setArtist("");
+      setSong("");
+      return;
+    }
+
     try {
-      const q = `${artist} ${song}`;
-      const result = await fetchBoth(q);
+      const q = [artist, song].filter(Boolean).join(" ");
+      const result = await fetchYouTube(q);
       if (!result) { alert(t.noResults); return; }
       addSong(result);
       setArtist(""); setSong("");
@@ -359,13 +354,12 @@ export default function App() {
       }
       const results = [];
       let firstError = null;
-      // Fetch YouTube + Spotify in parallel per song, songs processed sequentially to avoid rate limits
       for (const s of songs) {
         try {
-          const result = await fetchBoth(s);
+          const result = await fetchYouTube(s);
           if (result) results.push(result);
         } catch (e) {
-          if (!firstError) firstError = e; // capture first error for diagnostics
+          if (!firstError) firstError = e;
         }
       }
       if (!results.length) {
@@ -394,7 +388,6 @@ export default function App() {
   const prevSong = () => { if (!active.songs.length) return; setCurrentIndex((prev) => (prev - 1 + active.songs.length) % active.songs.length); };
 
   const currentSong = active.songs[currentIndex];
-  // True when the active player view is Spotify (either source="spotify" or source="both" on spotify tab)
   const showingSpotify =
     currentSong?.source === "spotify" ||
     (currentSong?.source === "both" && sourceTab === "spotify");
@@ -405,7 +398,7 @@ export default function App() {
       {ytQuotaExceeded && (
         <div className="bg-yellow-900/60 border-b border-yellow-700 text-yellow-300 text-sm text-center px-4 py-2 flex items-center justify-center gap-2">
           <span>⚠️</span>
-          <span>YouTube daily quota reached — searching Spotify only until midnight (Pacific Time)</span>
+          <span>YouTube daily quota reached — AI Generate unavailable until midnight (Pacific Time). You can still add songs via Spotify URL.</span>
         </div>
       )}
       {/* Header */}
@@ -506,7 +499,7 @@ export default function App() {
             <div className="bg-gray-900 rounded-2xl p-4">
               <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">{t.nowPlaying}</p>
 
-              {/* YouTube thumbnail — shown when on YouTube tab or source is youtube-only */}
+              {/* YouTube thumbnail */}
               {(currentSong.source === "youtube" || (currentSong.source === "both" && sourceTab === "youtube")) &&
                 currentSong.videoId && (
                 <div className="relative w-full mb-3 rounded-xl overflow-hidden">
@@ -555,7 +548,6 @@ export default function App() {
               <div className="flex justify-center gap-3 mb-3">
                 <button onClick={prevSong} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition">⏮</button>
 
-                {/* Repeat disabled when viewing Spotify (iframe has no JS API) */}
                 <button
                   onClick={() => !showingSpotify && setRepeat(!repeat)}
                   className={`px-4 py-2 rounded-xl transition ${
@@ -707,7 +699,6 @@ export default function App() {
               >
                 {/* Thumbnail / icon */}
                 {s.source === "both" && s.videoId ? (
-                  // YouTube thumbnail with Spotify badge
                   <div className="relative w-14 h-10 shrink-0">
                     <img
                       src={s.thumbnail || `https://img.youtube.com/vi/${s.videoId}/mqdefault.jpg`}
@@ -738,7 +729,6 @@ export default function App() {
 
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate leading-tight">{s.title}</p>
-                  {/* Source badges */}
                   <div className="flex gap-1 mt-0.5">
                     {(s.source === "youtube" || s.source === "both") && (
                       <span className="text-[10px] text-red-400 font-medium">YouTube</span>
