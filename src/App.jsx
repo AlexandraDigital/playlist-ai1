@@ -9,7 +9,7 @@ const TRANSLATIONS = {
     generateBtn: "⚡ Generate AI Playlist",
     addSong: "🔍 Add Song",
     artistPlaceholder: "Artist",
-    songPlaceholder: "Song title",
+    songPlaceholder: "Song title or Spotify URL",
     addSongBtn: "Add Song",
     nowPlaying: "🎵 Now Playing",
     clear: "🗑 Clear",
@@ -23,7 +23,7 @@ const TRANSLATIONS = {
     cantDelete: "Can't delete the last playlist",
     newPlaylistPrompt: "Name your playlist:",
     newPlaylistDefault: "New Playlist",
-    noResults: "No results found on YouTube or Spotify",
+    noResults: "No results found — try pasting a Spotify URL in the song field",
     searchFailed: "Search failed: ",
     aiError: "AI error: ",
     aiNoSongs: "AI returned no songs — make sure GROQ_API_KEY is set in Cloudflare Pages → Settings → Environment Variables",
@@ -45,7 +45,7 @@ const TRANSLATIONS = {
     generateBtn: "⚡ Generar Playlist con IA",
     addSong: "🔍 Agregar Canción",
     artistPlaceholder: "Artista",
-    songPlaceholder: "Título de la canción",
+    songPlaceholder: "Título de la canción o URL de Spotify",
     addSongBtn: "Agregar",
     nowPlaying: "🎵 Reproduciendo",
     clear: "🗑 Borrar",
@@ -59,7 +59,7 @@ const TRANSLATIONS = {
     cantDelete: "No se puede eliminar la última playlist",
     newPlaylistPrompt: "Nombre tu playlist:",
     newPlaylistDefault: "Nueva Playlist",
-    noResults: "No se encontraron resultados en YouTube o Spotify",
+    noResults: "No se encontraron resultados — prueba pegando una URL de Spotify",
     searchFailed: "Búsqueda fallida: ",
     aiError: "Error de IA: ",
     aiNoSongs: "La IA no devolvió canciones — asegúrate de tener GROQ_API_KEY configurado en Cloudflare Pages",
@@ -81,7 +81,7 @@ const TRANSLATIONS = {
     generateBtn: "⚡ AI 生成歌单",
     addSong: "🔍 添加歌曲",
     artistPlaceholder: "歌手",
-    songPlaceholder: "歌曲名称",
+    songPlaceholder: "歌曲名称或 Spotify 链接",
     addSongBtn: "添加",
     nowPlaying: "🎵 正在播放",
     clear: "🗑 清空",
@@ -95,7 +95,7 @@ const TRANSLATIONS = {
     cantDelete: "无法删除最后一个歌单",
     newPlaylistPrompt: "请输入歌单名称：",
     newPlaylistDefault: "新歌单",
-    noResults: "在 YouTube 或 Spotify 上未找到结果",
+    noResults: "未找到结果 — 试试在歌曲栏粘贴 Spotify 链接",
     searchFailed: "搜索失败：",
     aiError: "AI 错误：",
     aiNoSongs: "AI 未返回歌曲 — 请确保在 Cloudflare Pages 中设置了 GROQ_API_KEY",
@@ -265,75 +265,73 @@ export default function App() {
     if (!contentType.includes("application/json")) {
       throw new Error(`Endpoint ${url} returned non-JSON. Check Cloudflare Pages deployment and API keys.`);
     }
-    // Functions always return 200 with an optional "error" field — no HTTP 500s so Chrome doesn't log them
     return res.json();
   };
 
-  // Fetch YouTube and Spotify in parallel, return a combined song object
+  // Search YouTube (which also calls Odesli server-side to find Spotify embed URL).
+  // Returns a combined song object with both YouTube and Spotify data.
   const fetchBoth = async (query) => {
-    const [ytResult, spotifyResult] = await Promise.allSettled([
-      // Skip YouTube entirely this session if quota was already hit
-      ytQuotaRef.current
-        ? Promise.resolve({ items: [] })
-        : safeFetchJSON(`/search?q=${encodeURIComponent(query)}`),
-      safeFetchJSON(`/spotify?q=${encodeURIComponent(query)}`),
-    ]);
+    // Skip YouTube entirely this session if quota was already hit
+    if (ytQuotaRef.current) return null;
 
-    // Handle YouTube result — functions return 200 with optional error field
-    let vid = null;
-    if (ytResult.status === "fulfilled") {
-      const ytData = ytResult.value;
-      if (ytData.error) {
-        // Check if it's quota/rate-limit
-        const isQuota = /quota|limit exceeded|daily|forbidden|permission|rate/i.test(ytData.error);
-        ytErrorCountRef.current += 1;
-        if (isQuota || ytErrorCountRef.current >= 3) {
-          ytQuotaRef.current = true;
-          setYtQuotaExceeded(true);
-        }
-      } else {
-        vid = ytData.items?.[0] || null;
-        ytErrorCountRef.current = 0; // reset on success
-      }
-    } else {
-      // Network-level failure (no response at all)
+    let ytData;
+    try {
+      ytData = await safeFetchJSON(`/search?q=${encodeURIComponent(query)}`);
+    } catch (e) {
       ytErrorCountRef.current += 1;
       if (ytErrorCountRef.current >= 3) {
         ytQuotaRef.current = true;
         setYtQuotaExceeded(true);
       }
-    }
-
-    // Handle Spotify result — functions return 200 with optional error field
-    let spotifyTrack = null;
-    let spotifyError = null;
-    if (spotifyResult.status === "fulfilled") {
-      spotifyTrack = spotifyResult.value.track || null;
-      spotifyError = spotifyResult.value.error || null; // capture error for diagnostics
-    } else {
-      spotifyError = spotifyResult.reason?.message || "Spotify network error";
-    }
-
-    if (!vid && !spotifyTrack) {
-      // Both failed — throw Spotify error so callers can show it to the user
-      if (spotifyError) throw new Error(`Spotify: ${spotifyError}`);
       return null;
     }
 
-    const source = vid && spotifyTrack ? "both" : vid ? "youtube" : "spotify";
+    if (ytData.error) {
+      const isQuota = /quota|limit exceeded|daily|forbidden|permission|rate/i.test(ytData.error);
+      ytErrorCountRef.current += 1;
+      if (isQuota || ytErrorCountRef.current >= 3) {
+        ytQuotaRef.current = true;
+        setYtQuotaExceeded(true);
+      }
+      return null;
+    }
+
+    const vid = ytData.items?.[0] || null;
+    const spotifyEmbedUrl = ytData.spotifyEmbedUrl || null;
+    ytErrorCountRef.current = 0; // reset on success
+
+    if (!vid && !spotifyEmbedUrl) return null;
+
+    const source = vid && spotifyEmbedUrl ? "both" : vid ? "youtube" : "spotify";
     return {
-      title: vid ? vid.snippet.title : spotifyTrack.title,
+      title: vid ? vid.snippet.title : query,
       videoId: vid ? vid.id.videoId : null,
       thumbnail: vid ? `https://img.youtube.com/vi/${vid.id.videoId}/mqdefault.jpg` : null,
-      spotifyEmbedUrl: spotifyTrack ? spotifyTrack.embedUrl : null,
+      spotifyEmbedUrl,
       source,
     };
   };
 
   const searchSong = async () => {
     if (!artist && !song) return;
+
+    // If the song field contains a Spotify track URL, create the embed directly — no API calls needed
+    const spotifyUrlMatch = song.match(/open\.spotify\.com\/track\/([a-zA-Z0-9]+)/);
+    if (spotifyUrlMatch) {
+      const trackId = spotifyUrlMatch[1];
+      addSong({
+        title: artist ? `${artist} (Spotify)` : "Spotify Track",
+        videoId: null,
+        thumbnail: null,
+        spotifyEmbedUrl: `https://open.spotify.com/embed/track/${trackId}`,
+        source: "spotify",
+      });
+      setArtist(""); setSong("");
+      return;
+    }
+
     try {
-      const q = `${artist} ${song}`;
+      const q = [artist, song].filter(Boolean).join(" ");
       const result = await fetchBoth(q);
       if (!result) { alert(t.noResults); return; }
       addSong(result);
@@ -359,13 +357,13 @@ export default function App() {
       }
       const results = [];
       let firstError = null;
-      // Fetch YouTube + Spotify in parallel per song, songs processed sequentially to avoid rate limits
+      // Fetch YouTube + Spotify (via Odesli) per song, sequentially to avoid rate limits
       for (const s of songs) {
         try {
           const result = await fetchBoth(s);
           if (result) results.push(result);
         } catch (e) {
-          if (!firstError) firstError = e; // capture first error for diagnostics
+          if (!firstError) firstError = e;
         }
       }
       if (!results.length) {
@@ -394,7 +392,7 @@ export default function App() {
   const prevSong = () => { if (!active.songs.length) return; setCurrentIndex((prev) => (prev - 1 + active.songs.length) % active.songs.length); };
 
   const currentSong = active.songs[currentIndex];
-  // True when the active player view is Spotify (either source="spotify" or source="both" on spotify tab)
+  // True when the active player view is Spotify
   const showingSpotify =
     currentSong?.source === "spotify" ||
     (currentSong?.source === "both" && sourceTab === "spotify");
@@ -405,7 +403,7 @@ export default function App() {
       {ytQuotaExceeded && (
         <div className="bg-yellow-900/60 border-b border-yellow-700 text-yellow-300 text-sm text-center px-4 py-2 flex items-center justify-center gap-2">
           <span>⚠️</span>
-          <span>YouTube daily quota reached — searching Spotify only until midnight (Pacific Time)</span>
+          <span>YouTube daily quota reached — search unavailable until midnight (Pacific). You can still paste a Spotify URL in the Add Song field.</span>
         </div>
       )}
       {/* Header */}
@@ -707,7 +705,6 @@ export default function App() {
               >
                 {/* Thumbnail / icon */}
                 {s.source === "both" && s.videoId ? (
-                  // YouTube thumbnail with Spotify badge
                   <div className="relative w-14 h-10 shrink-0">
                     <img
                       src={s.thumbnail || `https://img.youtube.com/vi/${s.videoId}/mqdefault.jpg`}
