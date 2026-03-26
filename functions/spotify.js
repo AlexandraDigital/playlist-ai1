@@ -57,7 +57,7 @@ export async function onRequestGet({ request, env }) {
   if (!env.SPOTIFY_CLIENT_ID || !env.SPOTIFY_CLIENT_SECRET) {
     return json200({
       track: null,
-      error: "SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is not set. Go to Cloudflare Pages → Settings → Environment Variables and add both.",
+      error: "SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET is not set. Go to Cloudflare Pages -> Settings -> Environment Variables and add both.",
     });
   }
 
