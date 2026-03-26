@@ -190,9 +190,13 @@ export default function App() {
     localStorage.setItem("lang", lang);
   }, [lang]);
 
-  const [appInstalled, setAppInstalled] = useState(() =>
-    window.matchMedia("(display-mode: standalone)").matches
-  );
+  const [appInstalled, setAppInstalled] = useState(() => {
+    try {
+      return window.matchMedia("(display-mode: standalone)").matches;
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     const promptHandler = (e) => { e.preventDefault(); setDeferredPrompt(e); };
@@ -206,25 +210,23 @@ export default function App() {
   }, []);
 
   const installApp = async () => {
-    if (deferredPrompt) {
-      await deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === "accepted") setAppInstalled(true);
-      setDeferredPrompt(null);
-    } else {
-      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase());
-      if (isIOS) {
-        alert("To install Playlist AI:\n\n1. Tap the Share button (□↑) at the bottom of Safari\n2. Scroll down and tap \'Add to Home Screen\'\n3. Tap \'Add\'");
+    try {
+      if (deferredPrompt) {
+        await deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === "accepted") setAppInstalled(true);
+        setDeferredPrompt(null);
       } else {
-        alert("To install Playlist AI:\n\n1. Open this page in Chrome\n2. Tap the menu (⋮) in the top right\n3. Tap \'Add to Home Screen\'");
+        const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase());
+        if (isIOS) {
+          alert("To install Playlist AI:\n\n1. Tap the Share button (□↑) at the bottom of Safari\n2. Scroll down and tap 'Add to Home Screen'\n3. Tap 'Add'");
+        } else {
+          alert("To install Playlist AI:\n\n1. Open this page in Chrome\n2. Tap the menu (⋮) in the top right\n3. Tap 'Add to Home Screen'");
+        }
       }
+    } catch (err) {
+      console.error("Install error:", err);
     }
-  };
-
-  const upload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    addSong({ title: file.name, url: URL.createObjectURL(file), source: "local" });
   };
 
   useEffect(() => {
