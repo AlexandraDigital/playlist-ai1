@@ -134,6 +134,7 @@ export default function App() {
   const [playlists, setPlaylists] = useState([{ name: t.defaultPlaylist, songs: [] }]);
   const [currentPlaylist, setCurrentPlaylist] = useState(0);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [repeat, setRepeat] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -145,14 +146,19 @@ export default function App() {
   const [ytQuotaExceeded, setYtQuotaExceeded] = useState(false);
   const ytQuotaRef = useRef(false);
   const ytErrorCountRef = useRef(0);
+  // Used to force-remount iframes (to trigger autoplay)
+  const [playerKey, setPlayerKey] = useState(0);
 
   const fileInputRef = useRef();
   const renameInputRef = useRef();
+  const audioRef = useRef();
   const active = playlists[currentPlaylist];
 
-  // Reset player tab to spotify (preferred) whenever the song changes
+  // When song changes: reset to spotify tab + start playing
   useEffect(() => {
     setSourceTab("spotify");
+    setIsPlaying(true);
+    setPlayerKey((k) => k + 1);
   }, [currentIndex, currentPlaylist]);
 
   useEffect(() => {
@@ -376,13 +382,51 @@ export default function App() {
     setCurrentIndex(0);
   };
 
-  const nextSong = () => { if (!active.songs.length) return; setCurrentIndex((prev) => (prev + 1) % active.songs.length); };
-  const prevSong = () => { if (!active.songs.length) return; setCurrentIndex((prev) => (prev - 1 + active.songs.length) % active.songs.length); };
+  const nextSong = () => {
+    if (!active.songs.length) return;
+    setCurrentIndex((prev) => (prev + 1) % active.songs.length);
+  };
+
+  const prevSong = () => {
+    if (!active.songs.length) return;
+    setCurrentIndex((prev) => (prev - 1 + active.songs.length) % active.songs.length);
+  };
+
+  // Play/pause toggle
+  const togglePlay = () => {
+    const current = active.songs[currentIndex];
+    if (!current) return;
+
+    if (current.source === "local" && audioRef.current) {
+      // For local audio we can directly play/pause
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    } else {
+      // For Spotify/YouTube iframes: toggling play remounts with autoplay
+      // toggling pause hides the player (best we can do with iframes)
+      if (!isPlaying) {
+        setPlayerKey((k) => k + 1); // remount → triggers autoplay
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
 
   const currentSong = active.songs[currentIndex];
   const showingSpotify =
     currentSong?.source === "spotify" ||
     (currentSong?.source === "both" && sourceTab === "spotify");
+
+  // Build Spotify embed URL with autoplay when playing
+  const buildSpotifyUrl = (baseUrl) => {
+    if (!baseUrl) return null;
+    const url = new URL(baseUrl);
+    if (isPlaying) url.searchParams.set("autoplay", "1");
+    return url.toString();
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col">
@@ -538,7 +582,19 @@ export default function App() {
 
               {/* Playback controls */}
               <div className="flex justify-center gap-3 mb-3">
-                <button onClick={prevSong} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition">⏮</button>
+                <button
+                  onClick={prevSong}
+                  className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition"
+                >⏮</button>
+
+                {/* ▶/⏸ Play/Pause button */}
+                <button
+                  onClick={togglePlay}
+                  className="bg-purple-600 hover:bg-purple-500 px-5 py-2 rounded-xl text-lg font-bold transition shadow-lg"
+                  title={isPlaying ? "Pause" : "Play"}
+                >
+                  {isPlaying ? "⏸" : "▶"}
+                </button>
 
                 <button
                   onClick={() => !showingSpotify && setRepeat(!repeat)}
@@ -553,26 +609,39 @@ export default function App() {
                   disabled={showingSpotify}
                 >🔁</button>
 
-                <button onClick={nextSong} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition">⏭</button>
+                <button
+                  onClick={nextSong}
+                  className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition"
+                >⏭</button>
               </div>
 
               {/* ── Players ── */}
 
               {/* Local audio */}
               {currentSong.source === "local" && (
-                <audio src={currentSong.url} controls autoPlay loop={repeat} className="w-full" />
+                <audio
+                  ref={audioRef}
+                  src={currentSong.url}
+                  controls
+                  autoPlay={isPlaying}
+                  loop={repeat}
+                  className="w-full"
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                />
               )}
 
               {/* Spotify player — shown first (preferred) */}
-              {(currentSong.source === "spotify" ||
-                (currentSong.source === "both" && sourceTab === "spotify")) &&
+              {isPlaying &&
+                (currentSong.source === "spotify" ||
+                  (currentSong.source === "both" && sourceTab === "spotify")) &&
                 currentSong.spotifyEmbedUrl && (
                 <>
                   <iframe
-                    key={`sp-${currentSong.spotifyEmbedUrl}`}
+                    key={`sp-${playerKey}`}
                     className="w-full rounded-xl"
                     height="152"
-                    src={currentSong.spotifyEmbedUrl}
+                    src={buildSpotifyUrl(currentSong.spotifyEmbedUrl)}
                     allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
                     loading="lazy"
                   />
@@ -580,17 +649,45 @@ export default function App() {
                 </>
               )}
 
+              {/* Spotify paused state — show placeholder */}
+              {!isPlaying &&
+                (currentSong.source === "spotify" ||
+                  (currentSong.source === "both" && sourceTab === "spotify")) &&
+                currentSong.spotifyEmbedUrl && (
+                <div className="w-full h-[152px] bg-gray-800 rounded-xl flex flex-col items-center justify-center gap-2">
+                  <span className="text-4xl text-[#1db954]">♫</span>
+                  <p className="text-xs text-gray-400">Press ▶ to play</p>
+                </div>
+              )}
+
               {/* YouTube player */}
-              {(currentSong.source === "youtube" ||
-                (currentSong.source === "both" && sourceTab === "youtube")) &&
+              {isPlaying &&
+                (currentSong.source === "youtube" ||
+                  (currentSong.source === "both" && sourceTab === "youtube")) &&
                 currentSong.videoId && (
                 <iframe
-                  key={`yt-${currentSong.videoId}`}
+                  key={`yt-${playerKey}`}
                   className="w-full rounded-xl"
                   height="200"
                   src={`https://www.youtube.com/embed/${currentSong.videoId}?autoplay=1&loop=${repeat ? 1 : 0}&playlist=${currentSong.videoId}`}
                   allow="autoplay; encrypted-media"
                 />
+              )}
+
+              {/* YouTube paused state */}
+              {!isPlaying &&
+                (currentSong.source === "youtube" ||
+                  (currentSong.source === "both" && sourceTab === "youtube")) &&
+                currentSong.videoId && (
+                <div className="w-full h-[200px] bg-gray-800 rounded-xl flex flex-col items-center justify-center gap-2 relative overflow-hidden">
+                  <img
+                    src={`https://img.youtube.com/vi/${currentSong.videoId}/mqdefault.jpg`}
+                    alt=""
+                    className="absolute inset-0 w-full h-full object-cover opacity-30"
+                  />
+                  <span className="relative text-5xl">▶</span>
+                  <p className="relative text-xs text-gray-300">Press ▶ to play</p>
+                </div>
               )}
             </div>
           )}
@@ -738,7 +835,9 @@ export default function App() {
                 </div>
 
                 {i === currentIndex && (
-                  <span className="text-purple-400 text-xs shrink-0">▶</span>
+                  <span className="text-purple-400 text-xs shrink-0">
+                    {isPlaying ? "▶" : "⏸"}
+                  </span>
                 )}
 
                 <span className="text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing shrink-0 text-lg px-1" title={t.dragToReorder}>
