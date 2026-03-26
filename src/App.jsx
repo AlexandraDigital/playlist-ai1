@@ -8,7 +8,7 @@ const TRANSLATIONS = {
     generating: "⏳ Generating…",
     generateBtn: "⚡ Generate AI Playlist",
     addSong: "🔍 Add Song",
-    artistPlaceholder: "Artist (or paste Spotify URL)",
+    artistPlaceholder: "Artist, or paste Spotify / YouTube URL",
     songPlaceholder: "Song title",
     addSongBtn: "Add Song",
     nowPlaying: "🎵 Now Playing",
@@ -47,7 +47,7 @@ const TRANSLATIONS = {
     generating: "⏳ Generando…",
     generateBtn: "⚡ Generar Playlist con IA",
     addSong: "🔍 Agregar Canción",
-    artistPlaceholder: "Artista (o pega URL de Spotify)",
+    artistPlaceholder: "Artista, o pega URL de Spotify / YouTube",
     songPlaceholder: "Título de la canción",
     addSongBtn: "Agregar",
     nowPlaying: "🎵 Reproduciendo",
@@ -86,7 +86,7 @@ const TRANSLATIONS = {
     generating: "⏳ 生成中…",
     generateBtn: "⚡ AI 生成歌单",
     addSong: "🔍 添加歌曲",
-    artistPlaceholder: "歌手（或粘贴 Spotify 链接）",
+    artistPlaceholder: "歌手（或粘贴 Spotify / YouTube 链接）",
     songPlaceholder: "歌曲名称",
     addSongBtn: "添加",
     nowPlaying: "🎵 正在播放",
@@ -129,6 +129,12 @@ const LANG_OPTIONS = [
 // Extract Spotify track ID from a Spotify URL
 const extractSpotifyTrackId = (input) => {
   const match = input.match(/open\.spotify\.com\/(?:intl-[a-z]+\/)?track\/([a-zA-Z0-9]+)/);
+  return match ? match[1] : null;
+};
+
+// Extract YouTube video ID from a YouTube URL
+const extractYouTubeVideoId = (input) => {
+  const match = input.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
   return match ? match[1] : null;
 };
 
@@ -324,6 +330,31 @@ export default function App() {
   };
 
   const searchSong = async () => {
+    // Check if user pasted a YouTube URL
+    const youtubeId = extractYouTubeVideoId(artist) || extractYouTubeVideoId(song);
+    if (youtubeId) {
+      let title = "YouTube Video";
+      try {
+        const oembedRes = await fetch(
+          `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}&format=json`
+        );
+        if (oembedRes.ok) {
+          const oembedData = await oembedRes.json();
+          title = oembedData.title || title;
+        }
+      } catch (_) { /* oEmbed failed — use generic title */ }
+      addSong({
+        title,
+        videoId: youtubeId,
+        thumbnail: `https://img.youtube.com/vi/${youtubeId}/mqdefault.jpg`,
+        spotifyEmbedUrl: null,
+        soundcloudUrl: null,
+        source: "youtube",
+      });
+      setArtist(""); setSong("");
+      return;
+    }
+
     // Check if user pasted a Spotify URL in the artist field
     const spotifyId = extractSpotifyTrackId(artist) || extractSpotifyTrackId(song);
     if (spotifyId) {
