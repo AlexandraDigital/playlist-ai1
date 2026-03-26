@@ -979,6 +979,9 @@ export default function App() {
             <button onClick={clearPlaylist} className="flex-1 bg-gray-800 hover:bg-gray-700 p-2 rounded-xl text-sm transition">
               {t.clear}
             </button>
+            <button onClick={sharePlaylist} className="flex-1 bg-gray-800 hover:bg-purple-700 p-2 rounded-xl text-sm transition">
+              {t.share}
+            </button>
             {!appInstalled && (
               <button onClick={installApp} className="flex-1 bg-purple-700 hover:bg-purple-600 p-2 rounded-xl text-sm transition">
                 {t.install}
@@ -1015,11 +1018,7 @@ export default function App() {
                 className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-sm font-bold transition"
                 title={t.newPlaylist}
               >+</button>
-              <button
-                onClick={sharePlaylist}
-                className="bg-gray-700 hover:bg-purple-700 px-3 py-1 rounded-lg text-sm transition"
-                title={t.share}
-              >🔗</button>
+
               <button
                 onClick={deletePlaylist}
                 className="bg-gray-700 hover:bg-red-900 px-3 py-1 rounded-lg text-sm transition"
