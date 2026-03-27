@@ -197,6 +197,7 @@ export default function App() {
   const ytIframeRef = useRef(null);
   const scIframeRef = useRef(null);
   const active = playlists[currentPlaylist];
+  const currentSong = active.songs[currentIndex];
 
   // When song changes: pick best tab (Spotify > SoundCloud > YouTube) + start playing
   useEffect(() => {
@@ -674,8 +675,6 @@ export default function App() {
     }
     setIsPlaying(!isPlaying);
   };
-
-  const currentSong = active.songs[currentIndex];
 
   // Derive which tabs are available for current song
   const availableTabs = [
