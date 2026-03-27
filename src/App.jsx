@@ -177,6 +177,7 @@ export default function App() {
   });
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [shareCopiedToast, setShareCopiedToast] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [dragIndex, setDragIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
@@ -643,16 +644,26 @@ export default function App() {
     };
     const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(shareable))));
     const url = `${window.location.origin}${window.location.pathname}#share=${encoded}`;
+    const showToast = () => {
+      setShareCopiedToast(true);
+      setTimeout(() => setShareCopiedToast(false), 3000);
+    };
     try {
-      if (navigator.share) {
+      if (navigator.share && /mobile|android|iphone|ipad/i.test(navigator.userAgent)) {
+        // Native share sheet on mobile
         await navigator.share({ title: active.name, url });
       } else {
-        await navigator.clipboard.writeText(url);
-        alert(t.shareCopied + (hasLocal ? "\n\n" + t.shareLocalNote : ""));
+        // Desktop: copy to clipboard + show in-app toast
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast();
+        } catch {
+          // Clipboard blocked — show prompt so user can copy manually
+          prompt(t.shareCopied, url);
+        }
       }
     } catch (err) {
       if (err.name !== "AbortError") {
-        // Fallback: show URL in prompt
         prompt(t.shareCopied, url);
       }
     }
@@ -712,6 +723,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col">
+      {/* Share copied toast */}
+      {shareCopiedToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-purple-700 text-white px-5 py-3 rounded-2xl shadow-xl text-sm font-semibold flex items-center gap-2 animate-bounce">
+          <span>🔗</span>
+          <span>{t.shareCopied}</span>
+        </div>
+      )}
       {/* YouTube quota warning banner */}
       {ytQuotaExceeded && (
         <div className="bg-yellow-900/60 border-b border-yellow-700 text-yellow-300 text-sm text-center px-4 py-2 flex items-center justify-center gap-2">
@@ -1086,6 +1104,11 @@ export default function App() {
                 className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-sm transition"
                 title={t.rename}
               >✏️</button>
+              <button
+                onClick={sharePlaylist}
+                className="hidden lg:block bg-gray-700 hover:bg-purple-700 px-3 py-1 rounded-lg text-sm transition"
+                title={t.share}
+              >🔗</button>
               <button
                 onClick={newPlaylist}
                 className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-lg text-sm font-bold transition"
