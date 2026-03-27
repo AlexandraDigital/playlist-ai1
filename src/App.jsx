@@ -187,12 +187,15 @@ export default function App() {
   const ytErrorCountRef = useRef(0);
   const autoplayRef = useRef(false);
   const nextSongRef = useRef(null);
+  const prevSongRef = useRef(null);
   // Used to force-remount iframes (to trigger autoplay)
   const [playerKey, setPlayerKey] = useState(0);
 
   const fileInputRef = useRef();
   const renameInputRef = useRef();
   const audioRef = useRef();
+  const ytIframeRef = useRef(null);
+  const scIframeRef = useRef(null);
   const active = playlists[currentPlaylist];
 
   // When song changes: pick best tab (Spotify > SoundCloud > YouTube) + start playing
@@ -235,9 +238,10 @@ export default function App() {
     };
   }, []);
 
-  // nextSong ref so postMessage handler always has latest version
+  // nextSong / prevSong refs so postMessage handler and Media Session always have latest version
   useEffect(() => {
     nextSongRef.current = nextSong;
+    prevSongRef.current = prevSong;
   });
 
   // Autoplay: listen for YouTube "ended" + SoundCloud "SOUND_FINISHED" via postMessage
@@ -260,6 +264,61 @@ export default function App() {
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
   }, []);
+
+  // ── Media Session API ──────────────────────────────────────────────────────
+  // 1) Update metadata on the lock screen whenever the song changes
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !currentSong) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentSong.title || "Unknown",
+        artist: "Playlist AI",
+        artwork: currentSong.thumbnail
+          ? [{ src: currentSong.thumbnail, sizes: "480x360", type: "image/jpeg" }]
+          : [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+      });
+    } catch {}
+  }, [currentSong]);
+
+  // 2) Sync playback state so the OS knows if we're playing or paused
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+    } catch {}
+  }, [isPlaying]);
+
+  // 3) Register lock screen / headphone / Bluetooth action handlers (once)
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const handlers = {
+      play: () => { setIsPlaying(true); setPlayerKey((k) => k + 1); },
+      pause: () => {
+        setIsPlaying(false);
+        // Also tell the active iframe to pause
+        try {
+          ytIframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "pauseVideo", args: [] }), "*"
+          );
+          scIframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ method: "pause" }), "*"
+          );
+        } catch {}
+      },
+      stop: () => setIsPlaying(false),
+      nexttrack: () => nextSongRef.current?.(),
+      previoustrack: () => prevSongRef.current?.(),
+    };
+    for (const [action, handler] of Object.entries(handlers)) {
+      try { navigator.mediaSession.setActionHandler(action, handler); } catch {}
+    }
+    return () => {
+      for (const action of Object.keys(handlers)) {
+        try { navigator.mediaSession.setActionHandler(action, null); } catch {}
+      }
+    };
+  }, []); // eslint-disable-line
+  // ──────────────────────────────────────────────────────────────────────────
 
 
 
@@ -904,6 +963,7 @@ export default function App() {
               {isPlaying && showingSoundCloud && currentSong.soundcloudUrl && (
                 <>
                   <iframe
+                    ref={scIframeRef}
                     key={`sc-${playerKey}`}
                     className="w-full rounded-xl"
                     height="166"
@@ -932,6 +992,7 @@ export default function App() {
                     src={currentSong.localFileUrl}
                     controls
                     autoPlay
+                    playsInline
                     loop={repeat}
                     className="w-full rounded-xl"
                     style={{ maxHeight: "300px" }}
@@ -957,6 +1018,7 @@ export default function App() {
               {/* ── YOUTUBE PLAYER ── */}
               {isPlaying && sourceTab === "youtube" && currentSong.videoId && (
                 <iframe
+                  ref={ytIframeRef}
                   key={`yt-${playerKey}`}
                   className="w-full rounded-xl"
                   height="200"
