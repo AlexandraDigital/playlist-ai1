@@ -830,6 +830,57 @@ export default function App() {
             <input ref={fileInputRef} type="file" accept="audio/*,video/*" onChange={handleFileUpload} hidden />
           </div>
 
+          {/* Playback controls — always visible */}
+          <div className="bg-gray-900 rounded-2xl p-3">
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={prevSong}
+                disabled={!currentSong}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 rounded-xl transition"
+              >⏮</button>
+
+              <button
+                onClick={togglePlay}
+                disabled={!currentSong}
+                className="bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-lg font-bold transition shadow-lg"
+                title={isPlaying ? "Pause" : "Play"}
+              >
+                {isPlaying ? "⏸" : "▶"}
+              </button>
+
+              <button
+                onClick={() => repeatSupported && setRepeat(!repeat)}
+                className={`px-4 py-2 rounded-xl transition ${
+                  !repeatSupported
+                    ? "bg-gray-800 text-gray-600 cursor-not-allowed"
+                    : repeat
+                    ? "bg-purple-600"
+                    : "bg-gray-700 hover:bg-gray-600"
+                }`}
+                title={
+                  showingSpotify ? t.spotifyRepeatNote
+                  : showingSoundCloud ? t.scRepeatNote
+                  : t.toggleRepeat
+                }
+                disabled={!repeatSupported}
+              >🔁</button>
+
+              <button
+                onClick={() => setAutoplay((a) => !a)}
+                className={`px-3 py-2 rounded-xl text-sm font-bold transition ${
+                  autoplay ? "bg-purple-600 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                }`}
+                title="Autoplay next song"
+              >∞</button>
+
+              <button
+                onClick={nextSong}
+                disabled={!currentSong}
+                className="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 rounded-xl transition"
+              >⏭</button>
+            </div>
+          </div>
+
           {/* Now Playing card */}
           {currentSong && (
             <div className="bg-gray-900 rounded-2xl p-4">
@@ -907,52 +958,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Playback controls */}
-              <div className="flex justify-center gap-3 mb-3">
-                <button
-                  onClick={prevSong}
-                  className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition"
-                >⏮</button>
 
-                {/* ▶/⏸ Play/Pause button */}
-                <button
-                  onClick={togglePlay}
-                  className="bg-purple-600 hover:bg-purple-500 px-5 py-2 rounded-xl text-lg font-bold transition shadow-lg"
-                  title={isPlaying ? "Pause" : "Play"}
-                >
-                  {isPlaying ? "⏸" : "▶"}
-                </button>
-
-                <button
-                  onClick={() => repeatSupported && setRepeat(!repeat)}
-                  className={`px-4 py-2 rounded-xl transition ${
-                    !repeatSupported
-                      ? "bg-gray-800 text-gray-600 cursor-not-allowed"
-                      : repeat
-                      ? "bg-purple-600"
-                      : "bg-gray-700 hover:bg-gray-600"
-                  }`}
-                  title={
-                    showingSpotify ? t.spotifyRepeatNote
-                    : showingSoundCloud ? t.scRepeatNote
-                    : t.toggleRepeat
-                  }
-                  disabled={!repeatSupported}
-                >🔁</button>
-
-                <button
-                  onClick={() => setAutoplay((a) => !a)}
-                  className={`px-3 py-2 rounded-xl text-sm font-bold transition ${
-                    autoplay ? "bg-purple-600 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                  title="Autoplay next song"
-                >∞</button>
-
-                <button
-                  onClick={nextSong}
-                  className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-xl transition"
-                >⏭</button>
-              </div>
 
               {/* ── Players ── */}
 
@@ -1070,11 +1076,7 @@ export default function App() {
             <button onClick={clearPlaylist} className="flex-1 bg-gray-800 hover:bg-gray-700 p-2 rounded-xl text-sm transition">
               {t.clear}
             </button>
-            <button
-              onClick={() => setAutoplay((a) => !a)}
-              className={`flex-1 p-2 rounded-xl text-sm font-bold transition ${autoplay ? "bg-purple-600 text-white" : "bg-gray-800 hover:bg-gray-700 text-gray-300"}`}
-              title="Autoplay next song"
-            >∞ Auto</button>
+
             <button onClick={sharePlaylist} className="flex-1 bg-gray-800 hover:bg-purple-700 p-2 rounded-xl text-sm transition">
               {t.share}
             </button>
