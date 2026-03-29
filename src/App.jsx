@@ -181,7 +181,7 @@ export default function App() {
   const [renameValue, setRenameValue] = useState("");
   const [dragIndex, setDragIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
-  // "youtube" | "spotify" | "soundcloud" | "local" — which player tab is active
+  // "youtube" | "spotify" | "soundcloud" — which player tab is active
   const [sourceTab, setSourceTab] = useState("spotify");
   const [ytQuotaExceeded, setYtQuotaExceeded] = useState(false);
   const ytQuotaRef = useRef(false);
@@ -189,10 +189,7 @@ export default function App() {
   const autoplayRef = useRef(false);
   const nextSongRef = useRef(null);
   const prevSongRef = useRef(null);
-  // Debounce: prevent multiple auto-advances firing in quick succession
   const lastAdvanceTimeRef = useRef(0);
-  // Track when the player last mounted to ignore spurious early-ended events
-  const playerMountTimeRef = useRef(0);
   // Used to force-remount iframes (to trigger autoplay)
   const [playerKey, setPlayerKey] = useState(0);
 
@@ -224,13 +221,6 @@ export default function App() {
     autoplayRef.current = autoplay;
     try { localStorage.setItem("autoplay", autoplay ? "true" : "false"); } catch {}
   }, [autoplay]);
-
-  // Record mount time whenever the player key changes (used to debounce premature ended events)
-  // Also reset the advance debounce so the new song is free to advance when it ends
-  useEffect(() => {
-    playerMountTimeRef.current = Date.now();
-    lastAdvanceTimeRef.current = 0;
-  }, [playerKey]);
 
   const [appInstalled, setAppInstalled] = useState(() => {
     try {
@@ -265,65 +255,42 @@ export default function App() {
     document.body.appendChild(script);
   }, []);
 
-  // Debounced advance: prevents duplicate/rapid nextSong calls from causing skips
-  const debouncedAdvance = () => {
-    if (!autoplayRef.current) return;
-    const now = Date.now();
-    // Ignore if we advanced within the last 3 seconds
-    if (now - lastAdvanceTimeRef.current < 3000) return;
-    lastAdvanceTimeRef.current = now;
-    nextSongRef.current?.();
-  };
-
   // Autoplay: listen for YouTube "ended" + SoundCloud "SOUND_FINISHED" via postMessage
   useEffect(() => {
+    // Debounced advance: ignore duplicate events within 2 s of the last advance
+    const advanceNext = () => {
+      if (!autoplayRef.current) return;
+      const now = Date.now();
+      if (now - lastAdvanceTimeRef.current < 2000) return;
+      lastAdvanceTimeRef.current = now;
+      nextSongRef.current?.();
+    };
     const handleMessage = (e) => {
       if (!autoplayRef.current) return;
       try {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
         if (!data) return;
-
         // YouTube IFrame API: state 0 = ended (classic format)
-        // Guard: ignore if the player was just mounted (< 2 s ago) to avoid premature skips
         if (data.event === "onStateChange" && data.info === 0) {
-          if (Date.now() - playerMountTimeRef.current < 2000) return;
-          debouncedAdvance();
-          return;
+          advanceNext();
         }
-        // YouTube newer format: infoDelivery with playerState 0
+        // YouTube newer infoDelivery format
         if (data.event === "infoDelivery" && data.info?.playerState === 0) {
-          if (Date.now() - playerMountTimeRef.current < 2000) return;
-          debouncedAdvance();
-          return;
+          advanceNext();
         }
-        // SoundCloud finish is handled exclusively via the Widget API binding below
-        // to avoid double-advancing from both postMessage and SC.Widget FINISH events.
+        // SoundCloud Widget API
+        const scFinished =
+          (data.soundcloud === true && data.method === "SOUND_FINISHED") ||
+          (data.soundcloud === true && data.event === "finish") ||
+          (typeof e.data === "string" && e.data.includes("SOUND_FINISHED"));
+        if (scFinished) {
+          advanceNext();
+        }
       } catch {}
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Bind SoundCloud FINISH event via Widget API when SC iframe is mounted
-  useEffect(() => {
-    if (!scIframeRef.current) return;
-    // Wait for SC API to be available
-    let attempts = 0;
-    const tryBind = () => {
-      if (window.SC && scIframeRef.current) {
-        try {
-          const widget = window.SC.Widget(scIframeRef.current);
-          widget.bind(window.SC.Widget.Events.FINISH, () => {
-            debouncedAdvance();
-          });
-        } catch {}
-      } else if (attempts < 20) {
-        attempts++;
-        setTimeout(tryBind, 300);
-      }
-    };
-    setTimeout(tryBind, 500);
-  }, [playerKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Media Session API ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -351,7 +318,7 @@ export default function App() {
     const handlers = {
       play: () => {
         setIsPlaying(true);
-        // Resume the existing iframe instead of remounting it (remounting caused interruptions)
+        // Send play command to existing iframe instead of remounting (avoids interruptions)
         try {
           ytIframeRef.current?.contentWindow?.postMessage(
             JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*"
@@ -1019,6 +986,15 @@ export default function App() {
                     frameBorder="no"
                     src={buildSoundCloudUrl(currentSong.soundcloudUrl)}
                     allow="autoplay"
+                    onLoad={() => {
+                      try {
+                        if (!window.SC || !scIframeRef.current) return;
+                        const widget = window.SC.Widget(scIframeRef.current);
+                        widget.bind(window.SC.Widget.Events.FINISH, () => {
+                          if (autoplayRef.current) nextSongRef.current?.();
+                        });
+                      } catch {}
+                    }}
                   />
                   <p className="text-xs text-gray-500 text-center mt-1">{t.scRepeatNote}</p>
                 </>
@@ -1044,7 +1020,7 @@ export default function App() {
                     style={{ maxHeight: "300px" }}
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
-                    onEnded={() => { if (autoplayRef.current && !repeat) debouncedAdvance(); }}
+                    onEnded={() => { if (autoplayRef.current && !repeat) nextSong(); }}
                   />
                 ) : (
                   <audio
@@ -1056,7 +1032,7 @@ export default function App() {
                     className="w-full mt-2"
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
-                    onEnded={() => { if (autoplayRef.current && !repeat) debouncedAdvance(); }}
+                    onEnded={() => { if (autoplayRef.current && !repeat) nextSong(); }}
                   />
                 )
               )}
@@ -1068,7 +1044,7 @@ export default function App() {
                   key={`yt-${playerKey}`}
                   className="w-full rounded-xl"
                   height="200"
-                  src={`https://www.youtube.com/embed/${currentSong.videoId}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=${repeat ? 1 : 0}&playlist=${currentSong.videoId}`}
+                  src={`https://www.youtube.com/embed/${currentSong.videoId}?autoplay=1&enablejsapi=1&loop=${repeat ? 1 : 0}&playlist=${currentSong.videoId}`}
                   allow="autoplay; encrypted-media"
                   onLoad={() => {
                     try {
