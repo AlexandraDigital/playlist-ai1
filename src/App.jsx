@@ -187,6 +187,7 @@ export default function App() {
   const ytQuotaRef = useRef(false);
   const ytErrorCountRef = useRef(0);
   const autoplayRef = useRef(false);
+  const isPlayingRef = useRef(false);
   const nextSongRef = useRef(null);
   const prevSongRef = useRef(null);
   const lastAdvanceTimeRef = useRef(0);
@@ -221,6 +222,32 @@ export default function App() {
     autoplayRef.current = autoplay;
     try { localStorage.setItem("autoplay", autoplay ? "true" : "false"); } catch {}
   }, [autoplay]);
+
+  // Keep isPlayingRef in sync
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  // Reset advance debounce when a new song starts
+  useEffect(() => { lastAdvanceTimeRef.current = 0; }, [playerKey]);
+
+  // Resume playback when tab becomes visible again (handles switched tabs / app restored from background)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isPlayingRef.current) {
+        setTimeout(() => {
+          try {
+            ytIframeRef.current?.contentWindow?.postMessage(
+              JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*"
+            );
+            scIframeRef.current?.contentWindow?.postMessage(
+              JSON.stringify({ method: "play" }), "*"
+            );
+          } catch {}
+        }, 300);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   const [appInstalled, setAppInstalled] = useState(() => {
     try {
@@ -993,6 +1020,10 @@ export default function App() {
                         widget.bind(window.SC.Widget.Events.FINISH, () => {
                           if (autoplayRef.current) nextSongRef.current?.();
                         });
+                        // Force play in background tab / lock screen (auto_play param may be blocked)
+                        if (isPlayingRef.current) {
+                          setTimeout(() => { try { widget.play(); } catch {} }, 400);
+                        }
                       } catch {}
                     }}
                   />
@@ -1048,9 +1079,21 @@ export default function App() {
                   allow="autoplay; encrypted-media"
                   onLoad={() => {
                     try {
+                      // Register for state-change events
                       ytIframeRef.current?.contentWindow?.postMessage(
                         JSON.stringify({ event: "listening", id: 1 }), "*"
                       );
+                      // Force play after a brief delay — handles background tab / lock screen
+                      // where autoplay=1 URL param is blocked by the browser
+                      if (isPlayingRef.current) {
+                        setTimeout(() => {
+                          try {
+                            ytIframeRef.current?.contentWindow?.postMessage(
+                              JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*"
+                            );
+                          } catch {}
+                        }, 400);
+                      }
                     } catch {}
                   }}
                 />
