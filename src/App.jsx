@@ -191,6 +191,8 @@ export default function App() {
   const prevSongRef = useRef(null);
   // Debounce: prevent multiple auto-advances firing in quick succession
   const lastAdvanceTimeRef = useRef(0);
+  // Track when the player last mounted to ignore spurious early-ended events
+  const playerMountTimeRef = useRef(0);
   // Used to force-remount iframes (to trigger autoplay)
   const [playerKey, setPlayerKey] = useState(0);
 
@@ -222,6 +224,11 @@ export default function App() {
     autoplayRef.current = autoplay;
     try { localStorage.setItem("autoplay", autoplay ? "true" : "false"); } catch {}
   }, [autoplay]);
+
+  // Record mount time whenever the player key changes (used to debounce premature ended events)
+  useEffect(() => {
+    playerMountTimeRef.current = Date.now();
+  }, [playerKey]);
 
   const [appInstalled, setAppInstalled] = useState(() => {
     try {
@@ -275,20 +282,14 @@ export default function App() {
         if (!data) return;
 
         // YouTube IFrame API: state 0 = ended
-        // Only use onStateChange (not infoDelivery) to avoid duplicate triggers
+        // Guard: ignore if the player was just mounted (< 2 s ago) to avoid premature skips
         if (data.event === "onStateChange" && data.info === 0) {
+          if (Date.now() - playerMountTimeRef.current < 2000) return;
           debouncedAdvance();
           return;
         }
-
-        // SoundCloud Widget API finish event
-        const scFinished =
-          (data.soundcloud === true && data.method === "SOUND_FINISHED") ||
-          (data.soundcloud === true && data.event === "finish") ||
-          (typeof e.data === "string" && e.data.includes("SOUND_FINISHED"));
-        if (scFinished) {
-          debouncedAdvance();
-        }
+        // SoundCloud finish is handled exclusively via the Widget API binding below
+        // to avoid double-advancing from both postMessage and SC.Widget FINISH events.
       } catch {}
     };
     window.addEventListener("message", handleMessage);
@@ -340,7 +341,18 @@ export default function App() {
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
     const handlers = {
-      play: () => { setIsPlaying(true); setPlayerKey((k) => k + 1); },
+      play: () => {
+        setIsPlaying(true);
+        // Resume the existing iframe instead of remounting it (remounting caused interruptions)
+        try {
+          ytIframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*"
+          );
+          scIframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ method: "play" }), "*"
+          );
+        } catch {}
+      },
       pause: () => {
         setIsPlaying(false);
         try {
