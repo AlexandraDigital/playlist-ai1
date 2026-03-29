@@ -226,8 +226,10 @@ export default function App() {
   }, [autoplay]);
 
   // Record mount time whenever the player key changes (used to debounce premature ended events)
+  // Also reset the advance debounce so the new song is free to advance when it ends
   useEffect(() => {
     playerMountTimeRef.current = Date.now();
+    lastAdvanceTimeRef.current = 0;
   }, [playerKey]);
 
   const [appInstalled, setAppInstalled] = useState(() => {
@@ -281,9 +283,15 @@ export default function App() {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
         if (!data) return;
 
-        // YouTube IFrame API: state 0 = ended
+        // YouTube IFrame API: state 0 = ended (classic format)
         // Guard: ignore if the player was just mounted (< 2 s ago) to avoid premature skips
         if (data.event === "onStateChange" && data.info === 0) {
+          if (Date.now() - playerMountTimeRef.current < 2000) return;
+          debouncedAdvance();
+          return;
+        }
+        // YouTube newer format: infoDelivery with playerState 0
+        if (data.event === "infoDelivery" && data.info?.playerState === 0) {
           if (Date.now() - playerMountTimeRef.current < 2000) return;
           debouncedAdvance();
           return;
@@ -1060,7 +1068,7 @@ export default function App() {
                   key={`yt-${playerKey}`}
                   className="w-full rounded-xl"
                   height="200"
-                  src={`https://www.youtube.com/embed/${currentSong.videoId}?autoplay=1&enablejsapi=1&loop=${repeat ? 1 : 0}&playlist=${currentSong.videoId}`}
+                  src={`https://www.youtube.com/embed/${currentSong.videoId}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&loop=${repeat ? 1 : 0}&playlist=${currentSong.videoId}`}
                   allow="autoplay; encrypted-media"
                   onLoad={() => {
                     try {
